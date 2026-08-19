@@ -1,0 +1,6 @@
+{
+  "name": "Z-fix",
+  "description": "Professional layer-based image editing suite featuring advanced AI filters, non-destructive layer stack, batch processing, cloud sync, and enterprise activity oversight with analytics.",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
