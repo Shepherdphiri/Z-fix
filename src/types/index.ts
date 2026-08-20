@@ -222,3 +222,63 @@ export interface AIPresetFilter {
   aiPrompt?: string;
   tag: string;
 }
+
+export interface LiveEnhancementState {
+  activeTool: 'none' | 'denoise' | 'upscale' | 'bg_remover' | 'skin_retouch' | 'auto_enhance';
+  denoise: {
+    luminance: number;
+    color: number;
+  };
+  upscale: {
+    factor: 2 | 4;
+  };
+  bgRemover: {
+    mode: 'transparent' | 'color' | 'blur' | 'gradient' | 'photo';
+    color: string;
+    photoUrl?: string;
+    blurRadius: number;
+    threshold: number;
+    feather: number;
+    protectSubject: boolean;
+    activeTab?: 'background' | 'erase_restore' | 'shadow';
+    brushMode?: 'erase' | 'restore';
+    brushSize?: number;
+    brushSoftness?: number;
+    shadowType?: 'none' | 'drop' | 'floor' | 'floating';
+    shadowOpacity?: number;
+    shadowBlur?: number;
+  };
+  skinRetouch: {
+    smoothing: number;
+    blemish: number;
+    glow: number;
+  };
+  isComparingOriginal: boolean;
+}
+
+export function createDefaultLiveEnhancement(): LiveEnhancementState {
+  return {
+    activeTool: 'none',
+    denoise: { luminance: 65, color: 50 },
+    upscale: { factor: 2 },
+    bgRemover: {
+      mode: 'transparent',
+      color: '#ffffff',
+      photoUrl: '',
+      blurRadius: 24,
+      threshold: 45,
+      feather: 4,
+      protectSubject: true,
+      activeTab: 'background',
+      brushMode: 'erase',
+      brushSize: 32,
+      brushSoftness: 50,
+      shadowType: 'none',
+      shadowOpacity: 45,
+      shadowBlur: 20,
+    },
+    skinRetouch: { smoothing: 60, blemish: 50, glow: 30 },
+    isComparingOriginal: false,
+  };
+}
+

@@ -1,11 +1,20 @@
-import { Adjustments, Layer, Project } from '../types';
+import { Adjustments, Layer, Project, LiveEnhancementState } from '../types';
+import {
+  applyNoiseReduction,
+  applySkinRetouching,
+  applyAutoEnhance,
+  generateForegroundMask,
+} from './imageProcessors';
 
 export interface RenderOptions {
   showComparisonSplit?: boolean;
   comparisonPosition?: number; // 0 to 1
   renderOnlyLayerId?: string;
   exportScale?: number;
+  liveEnhancement?: LiveEnhancementState | null;
+  activeLayerId?: string;
 }
+
 
 // Generates procedural film grain pattern
 function applyGrain(ctx: CanvasRenderingContext2D, width: number, height: number, amount: number) {
@@ -184,7 +193,8 @@ export async function renderLayer(
   ctx: CanvasRenderingContext2D,
   layer: Layer,
   canvasWidth: number,
-  canvasHeight: number
+  canvasHeight: number,
+  options: RenderOptions = {}
 ) {
   if (!layer.visible || layer.opacity <= 0) return;
 
@@ -226,7 +236,199 @@ export async function renderLayer(
         }
       }
 
-      ctx.drawImage(img, -drawW / 2, -drawH / 2, drawW, drawH);
+      const isLiveActive =
+        options.activeLayerId === layer.id &&
+        options.liveEnhancement &&
+        options.liveEnhancement.activeTool !== 'none' &&
+        !options.liveEnhancement.isComparingOriginal;
+
+      if (isLiveActive && options.liveEnhancement) {
+        const tool = options.liveEnhancement.activeTool;
+        // Render onto an intermediate offscreen canvas to apply neural/pixel enhancements live on the main canvas
+        const tempCanvas = document.createElement('canvas');
+        // Render at crisp target scale
+        const scaleFactor = Math.min(1, 1400 / Math.max(drawW, drawH));
+        const pW = Math.round(drawW * scaleFactor);
+        const pH = Math.round(drawH * scaleFactor);
+        tempCanvas.width = pW;
+        tempCanvas.height = pH;
+
+        const tempCtx = tempCanvas.getContext('2d', { willReadFrequently: true });
+        if (tempCtx) {
+          tempCtx.drawImage(img, 0, 0, pW, pH);
+
+          if (tool === 'denoise') {
+            applyNoiseReduction(
+              tempCtx,
+              pW,
+              pH,
+              options.liveEnhancement.denoise.luminance,
+              options.liveEnhancement.denoise.color
+            );
+          } else if (tool === 'skin_retouch') {
+            applySkinRetouching(
+              tempCtx,
+              pW,
+              pH,
+              options.liveEnhancement.skinRetouch.smoothing,
+              options.liveEnhancement.skinRetouch.blemish,
+              options.liveEnhancement.skinRetouch.glow
+            );
+          } else if (tool === 'auto_enhance') {
+            applyAutoEnhance(tempCtx, pW, pH);
+          } else if (tool === 'bg_remover') {
+            const bgOpt = options.liveEnhancement.bgRemover;
+            const imgData = tempCtx.getImageData(0, 0, pW, pH);
+            const data = imgData.data;
+
+            const mask = generateForegroundMask(data, pW, pH, {
+              threshold: bgOpt.threshold,
+              feather: bgOpt.feather ?? 4,
+              protectSubject: bgOpt.protectSubject !== false,
+            });
+
+            // Apply alpha mask to foreground
+            for (let i = 0; i < pW * pH; i++) {
+              data[i * 4 + 3] = mask[i];
+            }
+            tempCtx.putImageData(imgData, 0, 0);
+
+            // If mode is not transparent, render backdrop on a secondary canvas
+            if (bgOpt.mode === 'color') {
+              const compCanvas = document.createElement('canvas');
+              compCanvas.width = pW;
+              compCanvas.height = pH;
+              const cCtx = compCanvas.getContext('2d');
+              if (cCtx) {
+                cCtx.fillStyle = bgOpt.color || '#ffffff';
+                cCtx.fillRect(0, 0, pW, pH);
+
+                if (bgOpt.shadowType && bgOpt.shadowType !== 'none') {
+                  const shadowOpacity = (bgOpt.shadowOpacity ?? 45) / 100;
+                  const shadowBlur = bgOpt.shadowBlur ?? 20;
+                  cCtx.shadowColor = `rgba(0, 0, 0, ${shadowOpacity})`;
+                  cCtx.shadowBlur = shadowBlur;
+                  if (bgOpt.shadowType === 'drop') {
+                    cCtx.shadowOffsetX = 10;
+                    cCtx.shadowOffsetY = 15;
+                  } else if (bgOpt.shadowType === 'floor') {
+                    cCtx.shadowOffsetX = 0;
+                    cCtx.shadowOffsetY = 28;
+                    cCtx.shadowBlur = shadowBlur * 1.5;
+                  } else if (bgOpt.shadowType === 'floating') {
+                    cCtx.shadowOffsetX = 0;
+                    cCtx.shadowOffsetY = 10;
+                    cCtx.shadowBlur = shadowBlur * 2;
+                  }
+                }
+
+                cCtx.drawImage(tempCanvas, 0, 0);
+                tempCtx.drawImage(compCanvas, 0, 0);
+              }
+            } else if (bgOpt.mode === 'blur') {
+              const compCanvas = document.createElement('canvas');
+              compCanvas.width = pW;
+              compCanvas.height = pH;
+              const cCtx = compCanvas.getContext('2d');
+              if (cCtx) {
+                cCtx.filter = `blur(${bgOpt.blurRadius || 24}px) brightness(0.9)`;
+                cCtx.drawImage(img, 0, 0, pW, pH);
+                cCtx.filter = 'none';
+
+                if (bgOpt.shadowType && bgOpt.shadowType !== 'none') {
+                  const shadowOpacity = (bgOpt.shadowOpacity ?? 45) / 100;
+                  const shadowBlur = bgOpt.shadowBlur ?? 20;
+                  cCtx.shadowColor = `rgba(0, 0, 0, ${shadowOpacity})`;
+                  cCtx.shadowBlur = shadowBlur;
+                  cCtx.shadowOffsetX = 0;
+                  cCtx.shadowOffsetY = 15;
+                }
+
+                cCtx.drawImage(tempCanvas, 0, 0);
+                tempCtx.drawImage(compCanvas, 0, 0);
+              }
+            } else if (bgOpt.mode === 'photo' && bgOpt.photoUrl) {
+              const compCanvas = document.createElement('canvas');
+              compCanvas.width = pW;
+              compCanvas.height = pH;
+              const cCtx = compCanvas.getContext('2d');
+              if (cCtx) {
+                try {
+                  const bgImg = await getCachedImage(bgOpt.photoUrl);
+                  cCtx.drawImage(bgImg, 0, 0, pW, pH);
+                } catch (e) {
+                  cCtx.fillStyle = '#ffffff';
+                  cCtx.fillRect(0, 0, pW, pH);
+                }
+
+                if (bgOpt.shadowType && bgOpt.shadowType !== 'none') {
+                  const shadowOpacity = (bgOpt.shadowOpacity ?? 45) / 100;
+                  const shadowBlur = bgOpt.shadowBlur ?? 20;
+                  cCtx.shadowColor = `rgba(0, 0, 0, ${shadowOpacity})`;
+                  cCtx.shadowBlur = shadowBlur;
+                  cCtx.shadowOffsetX = 10;
+                  cCtx.shadowOffsetY = 15;
+                }
+
+                cCtx.drawImage(tempCanvas, 0, 0);
+                tempCtx.drawImage(compCanvas, 0, 0);
+              }
+            } else if (bgOpt.mode === 'gradient') {
+              const compCanvas = document.createElement('canvas');
+              compCanvas.width = pW;
+              compCanvas.height = pH;
+              const cCtx = compCanvas.getContext('2d');
+              if (cCtx) {
+                const grad = cCtx.createLinearGradient(0, 0, pW, pH);
+                grad.addColorStop(0, '#1e1b4b');
+                grad.addColorStop(1, '#09090b');
+                cCtx.fillStyle = grad;
+                cCtx.fillRect(0, 0, pW, pH);
+
+                if (bgOpt.shadowType && bgOpt.shadowType !== 'none') {
+                  const shadowOpacity = (bgOpt.shadowOpacity ?? 45) / 100;
+                  const shadowBlur = bgOpt.shadowBlur ?? 20;
+                  cCtx.shadowColor = `rgba(0, 0, 0, ${shadowOpacity})`;
+                  cCtx.shadowBlur = shadowBlur;
+                  cCtx.shadowOffsetX = 0;
+                  cCtx.shadowOffsetY = 15;
+                }
+
+                cCtx.drawImage(tempCanvas, 0, 0);
+                tempCtx.drawImage(compCanvas, 0, 0);
+              }
+            } else {
+              // Transparent PNG mode with optional shadow
+              if (bgOpt.shadowType && bgOpt.shadowType !== 'none') {
+                const compCanvas = document.createElement('canvas');
+                compCanvas.width = pW;
+                compCanvas.height = pH;
+                const cCtx = compCanvas.getContext('2d');
+                if (cCtx) {
+                  const shadowOpacity = (bgOpt.shadowOpacity ?? 45) / 100;
+                  const shadowBlur = bgOpt.shadowBlur ?? 20;
+                  cCtx.shadowColor = `rgba(0, 0, 0, ${shadowOpacity})`;
+                  cCtx.shadowBlur = shadowBlur;
+                  cCtx.shadowOffsetX = 8;
+                  cCtx.shadowOffsetY = 14;
+                  cCtx.drawImage(tempCanvas, 0, 0);
+                  tempCtx.drawImage(compCanvas, 0, 0);
+                }
+              }
+            }
+          } else if (tool === 'upscale') {
+            tempCtx.filter = 'contrast(108%) saturate(104%)';
+            tempCtx.drawImage(tempCanvas, 0, 0);
+            tempCtx.filter = 'none';
+          }
+
+          ctx.drawImage(tempCanvas, -drawW / 2, -drawH / 2, drawW, drawH);
+        } else {
+          ctx.drawImage(img, -drawW / 2, -drawH / 2, drawW, drawH);
+        }
+      } else {
+        ctx.drawImage(img, -drawW / 2, -drawH / 2, drawW, drawH);
+      }
     } catch (e) {
       console.warn('Failed to load layer image:', layer.imageUrl, e);
     }
@@ -302,7 +504,7 @@ export async function renderProjectToCanvas(
     ctx.clip();
 
     for (const layer of project.layers) {
-      await renderLayer(ctx, layer, width, height);
+      await renderLayer(ctx, layer, width, height, options);
     }
     ctx.restore();
 
@@ -333,9 +535,10 @@ export async function renderProjectToCanvas(
     if (options.renderOnlyLayerId && layer.id !== options.renderOnlyLayerId) {
       continue;
     }
-    await renderLayer(ctx, layer, width, height);
+    await renderLayer(ctx, layer, width, height, options);
   }
 }
+
 
 // Export canvas image to Blob or DataURL with custom quality & format
 export async function exportProjectImage(

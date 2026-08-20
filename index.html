@@ -2,17 +2,42 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Z-fix</title>
-    <meta name="description" content="Z-fix: Professional layer-based image editing suite with AI filters, batch processing, and cloud sync." />
-    <meta property="og:title" content="Z-fix" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>Z-fix Studio</title>
+    <meta name="description" content="Z-fix: Professional layer-based image editing suite with AI filters, background removal, batch processing, and cloud sync." />
+    
+    <!-- PWA & Mobile Meta Tags -->
+    <link rel="manifest" href="/manifest.json" />
+    <meta name="theme-color" content="#0a0a0b" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Z-fix" />
+    <link rel="icon" type="image/svg+xml" href="/icon.svg" />
+    <link rel="apple-touch-icon" href="/icon.svg" />
+
+    <!-- OpenGraph & Social -->
+    <meta property="og:title" content="Z-fix Studio" />
     <meta property="og:description" content="Z-fix: Professional layer-based image editing suite with AI filters, batch processing, and cloud sync." />
     <meta property="og:type" content="website" />
     <meta name="twitter:card" content="summary_large_image" />
   </head>
-  <body>
+  <body class="bg-[#0a0a0b] text-[#e4e4e7] overflow-hidden">
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/sw.js').then(
+            (registration) => {
+              console.log('PWA ServiceWorker registered with scope:', registration.scope);
+            },
+            (err) => {
+              console.warn('PWA ServiceWorker registration failed:', err);
+            }
+          );
+        });
+      }
+    </script>
   </body>
 </html>
 

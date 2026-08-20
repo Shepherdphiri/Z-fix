@@ -1,0 +1,30 @@
+import fs from 'fs';
+import path from 'path';
+
+// Let's create an SVG icon first
+const svgContent = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#6366f1" />
+      <stop offset="100%" stop-color="#4338ca" />
+    </linearGradient>
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="8" stdDeviation="16" flood-color="#6366f1" flood-opacity="0.3" />
+    </filter>
+  </defs>
+  <rect width="512" height="512" rx="128" fill="#09090b" />
+  <rect x="24" y="24" width="464" height="464" rx="104" fill="none" stroke="#27272a" stroke-width="8" />
+  <g filter="url(#glow)">
+    <path d="M140 160 H372 L230 352 H372" fill="none" stroke="url(#grad)" stroke-width="48" stroke-linecap="round" stroke-linejoin="round" />
+    <circle cx="372" cy="160" r="20" fill="#a5b4fc" />
+    <circle cx="140" cy="352" r="20" fill="#a5b4fc" />
+  </g>
+</svg>`;
+
+const publicDir = path.resolve('public');
+if (!fs.existsSync(publicDir)) {
+  fs.mkdirSync(publicDir, { recursive: true });
+}
+
+fs.writeFileSync(path.join(publicDir, 'icon.svg'), svgContent);
+console.log('Created icon.svg');

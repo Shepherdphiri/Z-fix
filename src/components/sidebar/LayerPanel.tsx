@@ -14,6 +14,9 @@ import {
   Image as ImageIcon,
   ChevronUp,
   ChevronDown,
+  Upload,
+  Plus,
+  FolderOpen,
 } from 'lucide-react';
 
 const BLEND_MODES: { label: string; value: BlendMode }[] = [
@@ -45,6 +48,10 @@ export const LayerPanel: React.FC = () => {
     deleteLayer,
     duplicateLayer,
     moveLayer,
+    setPendingImportFile,
+    setShowImageImportModal,
+    setShowNewProjectModal,
+    setShowProjectsModal,
   } = useStudio();
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -52,56 +59,60 @@ export const LayerPanel: React.FC = () => {
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      const reader = new FileReader();
-      reader.onload = (ev) => {
-        const url = ev.target?.result as string;
-        addLayer('image', { name: file.name.replace(/\.[^/.]+$/, ''), url });
-      };
-      reader.readAsDataURL(file);
+      setPendingImportFile(file);
+      setShowImageImportModal(true);
+      e.target.value = '';
     }
   };
 
   return (
     <div className="flex flex-col h-full bg-[#0c0c0e] select-none text-[#e4e4e7]">
       {/* Header & Add Layer Actions */}
-      <div className="p-4 border-b border-[#27272a] flex items-center justify-between">
-        <span className="text-[10px] uppercase tracking-widest font-bold text-zinc-500">
-          Layers ({project.layers.length})
-        </span>
+      <div className="p-3 border-b border-[#27272a] space-y-2.5">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-1.5">
+            <Layers className="w-3.5 h-3.5 text-indigo-400" />
+            <span className="text-[10px] uppercase tracking-widest font-bold text-zinc-400">
+              Layers ({project.layers.length})
+            </span>
+          </div>
 
-        {/* Add Layer Menu */}
-        <div className="flex items-center gap-1">
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            className="p-1.5 hover:bg-[#18181b] rounded text-zinc-400 hover:text-white transition border border-transparent hover:border-[#27272a]"
-            title="Add Image Layer"
-          >
-            <ImageIcon className="w-3.5 h-3.5" />
-          </button>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/*"
-            className="hidden"
-            onChange={handleImageUpload}
-          />
+          {/* Quick Add Icons */}
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => addLayer('text')}
+              className="p-1.5 hover:bg-[#18181b] rounded text-zinc-400 hover:text-white transition border border-transparent hover:border-[#27272a]"
+              title="Add Typography Layer"
+            >
+              <Type className="w-3.5 h-3.5" />
+            </button>
 
-          <button
-            onClick={() => addLayer('text')}
-            className="p-1.5 hover:bg-[#18181b] rounded text-zinc-400 hover:text-white transition border border-transparent hover:border-[#27272a]"
-            title="Add Typography Layer"
-          >
-            <Type className="w-3.5 h-3.5" />
-          </button>
-
-          <button
-            onClick={() => addLayer('solid', { color: '#312e81' })}
-            className="p-1.5 hover:bg-[#18181b] rounded text-zinc-400 hover:text-white transition border border-transparent hover:border-[#27272a]"
-            title="Add Color Fill Solid"
-          >
-            <Paintbrush className="w-3.5 h-3.5" />
-          </button>
+            <button
+              onClick={() => addLayer('solid', { color: '#312e81' })}
+              className="p-1.5 hover:bg-[#18181b] rounded text-zinc-400 hover:text-white transition border border-transparent hover:border-[#27272a]"
+              title="Add Color Fill Solid"
+            >
+              <Paintbrush className="w-3.5 h-3.5" />
+            </button>
+          </div>
         </div>
+
+        {/* Primary Image Upload Button */}
+        <button
+          onClick={() => fileInputRef.current?.click()}
+          className="w-full py-2 px-3 bg-indigo-600/20 hover:bg-indigo-600/30 border border-indigo-500/40 text-indigo-200 hover:text-white rounded-lg text-xs font-semibold flex items-center justify-center gap-2 transition cursor-pointer active:scale-98 shadow-sm"
+          title="Upload image to layer or start new project"
+        >
+          <Upload className="w-3.5 h-3.5 text-indigo-400" />
+          <span>Upload Image / Photo</span>
+        </button>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          className="hidden"
+          onChange={handleImageUpload}
+        />
       </div>
 
       {/* Layer Stack List */}
@@ -114,9 +125,9 @@ export const LayerPanel: React.FC = () => {
             <div
               key={layer.id}
               onClick={() => setActiveLayerId(layer.id)}
-              className={`p-2.5 rounded border transition cursor-pointer ${
+              className={`p-2.5 rounded-lg border transition cursor-pointer ${
                 isActive
-                  ? 'bg-[#1c1c1f] border-white/20 shadow-lg'
+                  ? 'bg-[#1c1c1f] border-indigo-500/60 shadow-lg ring-1 ring-indigo-500/20'
                   : 'bg-[#09090b] border-[#27272a] hover:bg-[#141417]'
               }`}
             >
@@ -201,7 +212,7 @@ export const LayerPanel: React.FC = () => {
                       onChange={(e) =>
                         updateLayer(layer.id, { blendMode: e.target.value as BlendMode })
                       }
-                      className="bg-[#09090b] text-zinc-200 text-[11px] px-2 py-1 rounded border border-[#27272a] outline-none hover:border-zinc-700"
+                      className="bg-[#09090b] text-zinc-200 text-[11px] px-2 py-1 rounded border border-[#27272a] outline-none hover:border-zinc-700 cursor-pointer"
                     >
                       {BLEND_MODES.map((bm) => (
                         <option key={bm.value} value={bm.value}>
@@ -232,7 +243,7 @@ export const LayerPanel: React.FC = () => {
                       <button
                         onClick={() => moveLayer(actualIndex, actualIndex + 1)}
                         disabled={actualIndex >= project.layers.length - 1}
-                        className="p-1 hover:bg-[#27272a] rounded text-zinc-400 hover:text-white disabled:opacity-30"
+                        className="p-1 hover:bg-[#27272a] rounded text-zinc-400 hover:text-white disabled:opacity-30 cursor-pointer"
                         title="Bring Forward"
                       >
                         <ChevronUp className="w-3.5 h-3.5" />
@@ -240,7 +251,7 @@ export const LayerPanel: React.FC = () => {
                       <button
                         onClick={() => moveLayer(actualIndex, actualIndex - 1)}
                         disabled={actualIndex <= 0}
-                        className="p-1 hover:bg-[#27272a] rounded text-zinc-400 hover:text-white disabled:opacity-30"
+                        className="p-1 hover:bg-[#27272a] rounded text-zinc-400 hover:text-white disabled:opacity-30 cursor-pointer"
                         title="Send Backward"
                       >
                         <ChevronDown className="w-3.5 h-3.5" />
@@ -250,14 +261,14 @@ export const LayerPanel: React.FC = () => {
                     <div className="flex items-center gap-1">
                       <button
                         onClick={() => duplicateLayer(layer.id)}
-                        className="p-1 hover:bg-[#27272a] rounded text-zinc-400 hover:text-white transition"
+                        className="p-1 hover:bg-[#27272a] rounded text-zinc-400 hover:text-white transition cursor-pointer"
                         title="Duplicate Layer"
                       >
                         <Copy className="w-3.5 h-3.5" />
                       </button>
                       <button
                         onClick={() => deleteLayer(layer.id)}
-                        className="p-1 hover:bg-[#27272a] rounded text-zinc-400 hover:text-rose-400 transition"
+                        className="p-1 hover:bg-[#27272a] rounded text-zinc-400 hover:text-rose-400 transition cursor-pointer"
                         title="Delete Layer"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
@@ -269,6 +280,25 @@ export const LayerPanel: React.FC = () => {
             </div>
           );
         })}
+      </div>
+
+      {/* Footer Quick Links */}
+      <div className="p-3 border-t border-[#27272a] bg-[#09090b] flex items-center justify-between text-xs">
+        <button
+          onClick={() => setShowProjectsModal(true)}
+          className="text-zinc-400 hover:text-indigo-400 text-[11px] font-mono flex items-center gap-1 transition cursor-pointer"
+        >
+          <FolderOpen className="w-3 h-3" />
+          <span>All Projects</span>
+        </button>
+
+        <button
+          onClick={() => setShowNewProjectModal(true)}
+          className="text-indigo-400 hover:text-indigo-300 text-[11px] font-mono font-bold flex items-center gap-1 transition cursor-pointer"
+        >
+          <Plus className="w-3 h-3" />
+          <span>New Canvas</span>
+        </button>
       </div>
     </div>
   );

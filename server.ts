@@ -200,6 +200,181 @@ const activityLogs: StoredLog[] = [
 let currentUser = users[0];
 const syncedProjects = new Map<string, any>();
 
+// Seed default initial projects
+const defaultProject1 = {
+  id: 'proj-lumina-demo-01',
+  title: 'Studio Editorial Retouch',
+  width: 1200,
+  height: 800,
+  layers: [
+    {
+      id: 'layer-base-1',
+      name: 'Background Portrait',
+      type: 'image',
+      visible: true,
+      locked: false,
+      opacity: 100,
+      blendMode: 'source-over',
+      imageUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=1200&h=800&q=80',
+      originalWidth: 1200,
+      originalHeight: 800,
+      transform: { x: 0, y: 0, scaleX: 1, scaleY: 1, rotation: 0, flipH: false, flipV: false },
+      adjustments: {
+        exposure: 4,
+        brightness: 2,
+        contrast: 8,
+        highlights: -12,
+        shadows: 14,
+        whites: 5,
+        blacks: -8,
+        temperature: 6,
+        tint: 2,
+        vibrance: 10,
+        saturation: 0,
+        sharpness: 15,
+        clarity: 10,
+        blur: 0,
+        vignette: 12,
+        grain: 0,
+        hsl: {
+          red: { hue: 0, saturation: 5, luminance: 0 },
+          orange: { hue: 0, saturation: 10, luminance: 5 },
+          yellow: { hue: 0, saturation: 0, luminance: 0 },
+          green: { hue: 0, saturation: 0, luminance: 0 },
+          cyan: { hue: 0, saturation: 0, luminance: 0 },
+          blue: { hue: 0, saturation: 0, luminance: 0 },
+          purple: { hue: 0, saturation: 0, luminance: 0 },
+          magenta: { hue: 0, saturation: 0, luminance: 0 },
+        },
+        curve: {
+          rgb: [{ x: 0, y: 0 }, { x: 255, y: 255 }],
+          red: [{ x: 0, y: 0 }, { x: 255, y: 255 }],
+          green: [{ x: 0, y: 0 }, { x: 255, y: 255 }],
+          blue: [{ x: 0, y: 0 }, { x: 255, y: 255 }],
+        },
+      },
+    },
+    {
+      id: 'layer-text-1',
+      name: 'Editorial Masthead',
+      type: 'text',
+      visible: true,
+      locked: false,
+      opacity: 90,
+      blendMode: 'source-over',
+      text: 'VOGUE EDITORIAL 2026',
+      fontSize: 38,
+      textColor: '#ffffff',
+      fontFamily: 'serif',
+      fontWeight: 'bold',
+      transform: { x: 40, y: 700, scaleX: 1, scaleY: 1, rotation: 0, flipH: false, flipV: false },
+      adjustments: {
+        exposure: 0,
+        brightness: 0,
+        contrast: 0,
+        highlights: 0,
+        shadows: 0,
+        whites: 0,
+        blacks: 0,
+        temperature: 0,
+        tint: 0,
+        vibrance: 0,
+        saturation: 0,
+        sharpness: 0,
+        clarity: 0,
+        blur: 0,
+        vignette: 0,
+        grain: 0,
+        hsl: {
+          red: { hue: 0, saturation: 0, luminance: 0 },
+          orange: { hue: 0, saturation: 0, luminance: 0 },
+          yellow: { hue: 0, saturation: 0, luminance: 0 },
+          green: { hue: 0, saturation: 0, luminance: 0 },
+          cyan: { hue: 0, saturation: 0, luminance: 0 },
+          blue: { hue: 0, saturation: 0, luminance: 0 },
+          purple: { hue: 0, saturation: 0, luminance: 0 },
+          magenta: { hue: 0, saturation: 0, luminance: 0 },
+        },
+        curve: {
+          rgb: [{ x: 0, y: 0 }, { x: 255, y: 255 }],
+          red: [{ x: 0, y: 0 }, { x: 255, y: 255 }],
+          green: [{ x: 0, y: 0 }, { x: 255, y: 255 }],
+          blue: [{ x: 0, y: 0 }, { x: 255, y: 255 }],
+        },
+      },
+    },
+  ],
+  activeLayerId: 'layer-base-1',
+  updatedAt: new Date().toISOString(),
+  createdAt: new Date(Date.now() - 3600000 * 24).toISOString(),
+  previewUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=1200&h=800&q=80',
+  syncStatus: 'synced',
+};
+
+const defaultProject2 = {
+  id: 'proj-lumina-demo-02',
+  title: 'Nordic Alpine Sunset',
+  width: 1200,
+  height: 800,
+  layers: [
+    {
+      id: 'layer-base-2',
+      name: 'Mountain Vista',
+      type: 'image',
+      visible: true,
+      locked: false,
+      opacity: 100,
+      blendMode: 'source-over',
+      imageUrl: 'https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=crop&w=1200&h=800&q=80',
+      originalWidth: 1200,
+      originalHeight: 800,
+      transform: { x: 0, y: 0, scaleX: 1, scaleY: 1, rotation: 0, flipH: false, flipV: false },
+      adjustments: {
+        exposure: 8,
+        brightness: 0,
+        contrast: 16,
+        highlights: -30,
+        shadows: 35,
+        whites: 10,
+        blacks: -12,
+        temperature: 15,
+        tint: 5,
+        vibrance: 25,
+        saturation: 10,
+        sharpness: 20,
+        clarity: 15,
+        blur: 0,
+        vignette: 15,
+        grain: 5,
+        hsl: {
+          red: { hue: 5, saturation: 15, luminance: 0 },
+          orange: { hue: 0, saturation: 20, luminance: 5 },
+          yellow: { hue: -5, saturation: 10, luminance: 0 },
+          green: { hue: 0, saturation: 0, luminance: 0 },
+          cyan: { hue: 10, saturation: 25, luminance: -5 },
+          blue: { hue: 15, saturation: 30, luminance: -10 },
+          purple: { hue: 0, saturation: 0, luminance: 0 },
+          magenta: { hue: 0, saturation: 0, luminance: 0 },
+        },
+        curve: {
+          rgb: [{ x: 0, y: 0 }, { x: 255, y: 255 }],
+          red: [{ x: 0, y: 0 }, { x: 255, y: 255 }],
+          green: [{ x: 0, y: 0 }, { x: 255, y: 255 }],
+          blue: [{ x: 0, y: 0 }, { x: 255, y: 255 }],
+        },
+      },
+    },
+  ],
+  activeLayerId: 'layer-base-2',
+  updatedAt: new Date(Date.now() - 3600000 * 5).toISOString(),
+  createdAt: new Date(Date.now() - 3600000 * 48).toISOString(),
+  previewUrl: 'https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=crop&w=1200&h=800&q=80',
+  syncStatus: 'synced',
+};
+
+syncedProjects.set(defaultProject1.id, defaultProject1);
+syncedProjects.set(defaultProject2.id, defaultProject2);
+
 async function startServer() {
   const app = express();
   const PORT = 3000;
@@ -417,6 +592,47 @@ async function startServer() {
       latencyHistory,
       weeklyActivity,
     });
+  });
+
+  app.get('/api/projects', (req: Request, res: Response) => {
+    const list = Array.from(syncedProjects.values()).sort(
+      (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+    );
+    res.json({ projects: list, count: list.length });
+  });
+
+  app.post('/api/projects', (req: Request, res: Response) => {
+    const { project } = req.body;
+    if (!project || !project.id) {
+      return res.status(400).json({ error: 'Missing project payload' });
+    }
+    project.updatedAt = new Date().toISOString();
+    project.syncStatus = 'synced';
+    syncedProjects.set(project.id, project);
+
+    activityLogs.unshift({
+      id: `log-${Date.now()}`,
+      timestamp: new Date().toISOString(),
+      userId: currentUser?.id || 'anonymous',
+      userEmail: currentUser?.email || 'anonymous@user.io',
+      action: 'project_save',
+      details: `Saved project "${project.title}" (${project.layers?.length || 0} layers)`,
+      ip: req.ip || '127.0.0.1',
+      platform: 'Web Desktop',
+      status: 'success',
+    });
+
+    res.json({ success: true, project });
+  });
+
+  app.delete('/api/projects/:id', (req: Request, res: Response) => {
+    const { id } = req.params;
+    const deleted = syncedProjects.delete(id);
+    if (deleted) {
+      res.json({ success: true, message: 'Project removed' });
+    } else {
+      res.status(404).json({ error: 'Project not found' });
+    }
   });
 
   app.post('/api/projects/sync', (req: Request, res: Response) => {

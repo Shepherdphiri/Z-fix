@@ -9,6 +9,9 @@ import { AdminDashboardView } from './components/admin/AdminDashboardView';
 import { AnalyticsDashboardView } from './components/analytics/AnalyticsDashboardView';
 import { ExportModal } from './components/modals/ExportModal';
 import { AuthModal } from './components/modals/AuthModal';
+import { NewProjectModal } from './components/modals/NewProjectModal';
+import { ProjectsManagerModal } from './components/modals/ProjectsManagerModal';
+import { ImageImportModal } from './components/modals/ImageImportModal';
 import { Layers, Sliders, CheckCircle2, Shield, Lock } from 'lucide-react';
 
 interface ErrorBoundaryProps {
@@ -111,7 +114,7 @@ const StudioMain: React.FC = () => {
             </aside>
 
             {/* Center Canvas Workspace */}
-            <div className="flex-1 h-full relative flex flex-col bg-[#121214]">
+            <div className="flex-1 min-w-0 min-h-0 h-full relative flex flex-col bg-[#121214] overflow-hidden">
               <StudioCanvas />
 
               {/* Mobile Drawer Floating Action Bar */}
@@ -180,7 +183,7 @@ const StudioMain: React.FC = () => {
             </div>
 
             {/* Desktop Right Sidebar: Adjustments & AI Grading */}
-            <aside className="hidden md:block h-full shrink-0 border-l border-[#27272a] bg-[#0c0c0e]">
+            <aside className="hidden md:block w-80 lg:w-88 h-full shrink-0 border-l border-[#27272a] bg-[#0c0c0e] overflow-hidden">
               <AdjustmentsSidebar />
             </aside>
           </>
@@ -210,7 +213,29 @@ const StudioMain: React.FC = () => {
             </div>
           )
         )}
-        {currentMode === 'analytics' && <AnalyticsDashboardView />}
+        {currentMode === 'analytics' && (
+          currentUser?.role === 'admin' ? (
+            <AnalyticsDashboardView />
+          ) : (
+            <div className="flex-1 h-full bg-[#0a0a0b] flex flex-col items-center justify-center p-6 text-center space-y-4 text-white">
+              <div className="w-16 h-16 rounded-2xl bg-rose-500/10 border border-rose-500/30 flex items-center justify-center text-rose-400">
+                <Shield className="w-8 h-8" />
+              </div>
+              <h2 className="text-base font-bold font-mono uppercase tracking-widest text-white">
+                Analytics Restricted
+              </h2>
+              <p className="text-xs text-zinc-400 max-w-sm">
+                System telemetry and analytics dashboards are restricted to authorized administrators.
+              </p>
+              <button
+                onClick={() => setCurrentMode('editor')}
+                className="px-4 py-2 bg-[#18181b] hover:bg-[#27272a] text-white rounded text-xs font-mono font-bold uppercase tracking-wider border border-[#27272a]"
+              >
+                Return to Editor
+              </button>
+            </div>
+          )
+        )}
       </main>
 
       {/* Sophisticated Dark Bottom Status Bar Footer with Developer Credit & Admin Shield Button */}
@@ -264,6 +289,9 @@ const StudioMain: React.FC = () => {
       {/* Global Modals */}
       <ExportModal />
       <AuthModal />
+      <NewProjectModal />
+      <ProjectsManagerModal />
+      <ImageImportModal />
 
       {/* Toast Notification */}
       {toastMessage && (

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useStudio } from '../../context/StudioContext';
 import {
   applyNoiseReduction,
@@ -7,6 +7,7 @@ import {
   removeOrReplaceBackground,
   applyAutoEnhance,
   loadImage,
+  REMOVE_BG_PRESET_PHOTOS,
 } from '../../utils/imageProcessors';
 import {
   Sparkles,
@@ -19,26 +20,40 @@ import {
   Check,
   RefreshCw,
   Eye,
-  EyeOff,
-  Layers,
   RotateCcw,
-  ZoomIn,
   SplitSquareVertical,
-  Activity,
+  Layers,
+  Download,
+  Plus,
+  Upload,
+  Paintbrush,
+  Eraser,
+  Sun,
+  SlidersHorizontal,
+  Image as ImageIcon,
+  Palette,
+  EyeOff,
+  ShieldCheck,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react';
 
 export const EnhancementToolsPanel: React.FC = () => {
   const {
     activeLayer,
     updateLayer,
+    addLayer,
     project,
     setProject,
+    liveEnhancement,
+    updateLiveEnhancement,
+    resetLiveEnhancement,
     showToast,
   } = useStudio();
 
   const [activeEnhanceSection, setActiveEnhanceSection] = useState<
     'denoise' | 'upscale' | 'bg_remover' | 'skin_retouch' | 'auto_enhance'
-  >('denoise');
+  >('bg_remover');
 
   // Noise Reduction State
   const [denoiseStrength, setDenoiseStrength] = useState<number>(65);
@@ -49,12 +64,26 @@ export const EnhancementToolsPanel: React.FC = () => {
   const [upscaleFactor, setUpscaleFactor] = useState<2 | 4>(2);
   const [isUpscaling, setIsUpscaling] = useState<boolean>(false);
 
-  // Background Remover State
-  const [bgMode, setBgMode] = useState<'transparent' | 'color' | 'blur' | 'gradient'>('transparent');
-  const [bgColor, setBgColor] = useState<string>('#0a0a0b');
-  const [bgBlurRadius, setBgBlurRadius] = useState<number>(25);
+  // Background Remover State (remove.bg Suite)
+  const [bgTab, setBgTab] = useState<'background' | 'erase_restore' | 'shadow'>('background');
+  const [bgMode, setBgMode] = useState<'transparent' | 'color' | 'blur' | 'gradient' | 'photo'>('transparent');
+  const [bgColor, setBgColor] = useState<string>('#ffffff');
+  const [bgPhotoUrl, setBgPhotoUrl] = useState<string>(REMOVE_BG_PRESET_PHOTOS[0].url);
+  const [bgBlurRadius, setBgBlurRadius] = useState<number>(24);
+  const [bgShadowType, setBgShadowType] = useState<'none' | 'drop' | 'floor' | 'floating'>('none');
+  const [bgShadowOpacity, setBgShadowOpacity] = useState<number>(45);
+  const [bgShadowBlur, setBgShadowBlur] = useState<number>(20);
   const [bgThreshold, setBgThreshold] = useState<number>(45);
+  const [bgFeather, setBgFeather] = useState<number>(4);
+  const [protectSubject, setProtectSubject] = useState<boolean>(true);
   const [isRemovingBg, setIsRemovingBg] = useState<boolean>(false);
+  const [isDownloadingCutout, setIsDownloadingCutout] = useState<boolean>(false);
+  const [showAdvancedSettings, setShowAdvancedSettings] = useState<boolean>(false);
+
+  // Erase & Restore Brush State
+  const [brushMode, setBrushMode] = useState<'erase' | 'restore'>('erase');
+  const [brushSize, setBrushSize] = useState<number>(32);
+  const [brushSoftness, setBrushSoftness] = useState<number>(50);
 
   // Skin Retouching State
   const [skinSmoothing, setSkinSmoothing] = useState<number>(60);
@@ -62,167 +91,82 @@ export const EnhancementToolsPanel: React.FC = () => {
   const [skinGlow, setSkinGlow] = useState<number>(30);
   const [isSkinRetouching, setIsSkinRetouching] = useState<boolean>(false);
 
-  // Live Preview Canvas State & Refs
-  const previewCanvasRef = useRef<HTMLCanvasElement>(null);
-  const originalImgRef = useRef<HTMLImageElement | null>(null);
-  const [isPreviewRendering, setIsPreviewRendering] = useState<boolean>(false);
-  const [splitPosition, setSplitPosition] = useState<number>(50); // 0-100 percentage
+  // Comparison State
   const [isComparingOriginal, setIsComparingOriginal] = useState<boolean>(false);
-  const [previewZoom, setPreviewZoom] = useState<'fit' | '100%' | '200%'>('fit');
-  const [renderLatencyMs, setRenderLatencyMs] = useState<number>(12);
-  const [liveCanvasOverlay, setLiveCanvasOverlay] = useState<boolean>(false);
 
-  // Load active layer source image for fast memory caching
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  // Sync state into the global liveEnhancement engine so the main canvas renders the preview in real-time
   useEffect(() => {
-    if (!activeLayer?.imageUrl) return;
-    let isMounted = true;
-    loadImage(activeLayer.imageUrl)
-      .then((img) => {
-        if (isMounted) {
-          originalImgRef.current = img;
-          triggerLivePreview();
-        }
-      })
-      .catch((err) => console.error('Failed to load layer image for live preview:', err));
-
-    return () => {
-      isMounted = false;
-    };
-  }, [activeLayer?.imageUrl]);
-
-  // Master Live Preview Engine: Computes real-time preview as sliders change
-  const triggerLivePreview = useCallback(() => {
-    const origImg = originalImgRef.current;
-    const canvas = previewCanvasRef.current;
-    if (!origImg || !canvas) return;
-
-    setIsPreviewRendering(true);
-    const startTime = performance.now();
-
-    const pCtx = canvas.getContext('2d', { willReadFrequently: true });
-    if (!pCtx) return;
-
-    // Fast working resolution for preview
-    const aspect = (origImg.naturalWidth || origImg.width) / (origImg.naturalHeight || origImg.height);
-    const targetWidth = 480;
-    const targetHeight = Math.round(targetWidth / aspect);
-
-    canvas.width = targetWidth;
-    canvas.height = targetHeight;
-
-    // Draw base original image
-    pCtx.clearRect(0, 0, targetWidth, targetHeight);
-    pCtx.drawImage(origImg, 0, 0, targetWidth, targetHeight);
-
-    // If user is pressing "Hold to Compare", keep original and stop
-    if (isComparingOriginal) {
-      setIsPreviewRendering(false);
-      setRenderLatencyMs(Math.round(performance.now() - startTime));
-      return;
-    }
-
-    // Apply the active tool's live effect onto the preview canvas
-    if (activeEnhanceSection === 'denoise') {
-      applyNoiseReduction(pCtx, targetWidth, targetHeight, denoiseStrength, colorDenoise);
-    } else if (activeEnhanceSection === 'skin_retouch') {
-      applySkinRetouching(pCtx, targetWidth, targetHeight, skinSmoothing, blemishReduction, skinGlow);
-    } else if (activeEnhanceSection === 'auto_enhance') {
-      applyAutoEnhance(pCtx, targetWidth, targetHeight);
-    } else if (activeEnhanceSection === 'bg_remover') {
-      // Fast procedural background preview
-      const imgData = pCtx.getImageData(0, 0, targetWidth, targetHeight);
-      const data = imgData.data;
-
-      // Sample corner as background estimate
-      const bgR = data[0];
-      const bgG = data[1];
-      const bgB = data[2];
-      const threshDist = (bgThreshold / 100) * 180;
-
-      for (let i = 0; i < data.length; i += 4) {
-        const r = data[i];
-        const g = data[i + 1];
-        const b = data[i + 2];
-        const dist = Math.hypot(r - bgR, g - bgG, b - bgB);
-
-        if (dist < threshDist) {
-          if (bgMode === 'transparent') {
-            data[i + 3] = 0;
-          } else if (bgMode === 'color') {
-            // Apply solid color
-            const parsedHex = bgColor.replace('#', '');
-            const cr = parseInt(parsedHex.substring(0, 2), 16) || 0;
-            const cg = parseInt(parsedHex.substring(2, 4), 16) || 0;
-            const cb = parseInt(parsedHex.substring(4, 6), 16) || 0;
-            data[i] = cr;
-            data[i + 1] = cg;
-            data[i + 2] = cb;
-          } else if (bgMode === 'blur') {
-            data[i] = Math.round(data[i] * 0.4);
-            data[i + 1] = Math.round(data[i + 1] * 0.4);
-            data[i + 2] = Math.round(data[i + 2] * 0.4);
-          } else if (bgMode === 'gradient') {
-            const yRatio = Math.floor(i / 4 / targetWidth) / targetHeight;
-            data[i] = Math.round(15 + yRatio * 50);
-            data[i + 1] = Math.round(20 + yRatio * 80);
-            data[i + 2] = Math.round(40 + yRatio * 160);
-          }
-        }
-      }
-      pCtx.putImageData(imgData, 0, 0);
-    } else if (activeEnhanceSection === 'upscale') {
-      // Simulate ultra-crisp edge reconstruction
-      pCtx.filter = 'contrast(108%) saturate(104%)';
-      pCtx.drawImage(canvas, 0, 0);
-      pCtx.filter = 'none';
-    }
-
-    // If Split comparison is active (< 100%), draw original on left half
-    if (splitPosition < 100) {
-      const splitX = Math.round((splitPosition / 100) * targetWidth);
-      pCtx.save();
-      pCtx.beginPath();
-      pCtx.rect(0, 0, splitX, targetHeight);
-      pCtx.clip();
-      pCtx.drawImage(origImg, 0, 0, targetWidth, targetHeight);
-      pCtx.restore();
-
-      // Draw vertical divider line
-      pCtx.strokeStyle = '#ffffff';
-      pCtx.lineWidth = 2;
-      pCtx.beginPath();
-      pCtx.moveTo(splitX, 0);
-      pCtx.lineTo(splitX, targetHeight);
-      pCtx.stroke();
-    }
-
-    setIsPreviewRendering(false);
-    setRenderLatencyMs(Math.max(4, Math.round(performance.now() - startTime)));
+    updateLiveEnhancement({
+      activeTool: activeEnhanceSection,
+      denoise: {
+        luminance: denoiseStrength,
+        color: colorDenoise,
+      },
+      upscale: {
+        factor: upscaleFactor,
+      },
+      bgRemover: {
+        mode: bgMode,
+        color: bgColor,
+        photoUrl: bgPhotoUrl,
+        blurRadius: bgBlurRadius,
+        threshold: bgThreshold,
+        feather: bgFeather,
+        protectSubject: protectSubject,
+        activeTab: bgTab,
+        brushMode: brushMode,
+        brushSize: brushSize,
+        brushSoftness: brushSoftness,
+        shadowType: bgShadowType,
+        shadowOpacity: bgShadowOpacity,
+        shadowBlur: bgShadowBlur,
+      },
+      skinRetouch: {
+        smoothing: skinSmoothing,
+        blemish: blemishReduction,
+        glow: skinGlow,
+      },
+      isComparingOriginal: isComparingOriginal,
+    });
   }, [
     activeEnhanceSection,
     denoiseStrength,
     colorDenoise,
     upscaleFactor,
+    bgTab,
     bgMode,
     bgColor,
+    bgPhotoUrl,
     bgBlurRadius,
+    bgShadowType,
+    bgShadowOpacity,
+    bgShadowBlur,
+    brushMode,
+    brushSize,
+    brushSoftness,
     bgThreshold,
+    bgFeather,
+    protectSubject,
     skinSmoothing,
     blemishReduction,
     skinGlow,
-    splitPosition,
     isComparingOriginal,
+    updateLiveEnhancement,
   ]);
 
-  // Trigger live preview whenever any parameter changes
+  // Clean up live enhancement preview when unmounting
   useEffect(() => {
-    const handle = requestAnimationFrame(triggerLivePreview);
-    return () => cancelAnimationFrame(handle);
-  }, [triggerLivePreview]);
+    return () => {
+      resetLiveEnhancement();
+    };
+  }, [resetLiveEnhancement]);
 
   if (!activeLayer) {
     return (
-      <div className="p-4 text-center text-xs text-zinc-500 font-mono">
+      <div className="p-6 text-center text-xs text-zinc-500 font-mono bg-[#18181b] rounded-xl border border-[#27272a]">
+        <Layers className="w-6 h-6 mx-auto mb-2 text-zinc-600" />
         Select an image layer to run neural enhancements
       </div>
     );
@@ -251,7 +195,7 @@ export const EnhancementToolsPanel: React.FC = () => {
         imageUrl: processedDataUrl,
       });
 
-      showToast(`Noise reduction applied (${denoiseStrength}% strength)`);
+      showToast(`Noise reduction baked to layer (${denoiseStrength}% strength)`);
     } catch (err: any) {
       showToast(`Denoise error: ${err?.message || 'Failed'}`);
     } finally {
@@ -271,17 +215,19 @@ export const EnhancementToolsPanel: React.FC = () => {
 
       const result = await upscaleImageLayer(activeLayer.imageUrl, upscaleFactor, true);
 
-      updateLayer(activeLayer.id, {
-        imageUrl: result.dataUrl,
-        originalWidth: result.width,
-        originalHeight: result.height,
-      });
-
-      setProject((prev) => ({
-        ...prev,
-        width: Math.max(prev.width, result.width),
-        height: Math.max(prev.height, result.height),
-      }));
+      // Update layer with new upscaled image and update project dimensions
+      updateLayer(
+        activeLayer.id,
+        {
+          imageUrl: result.dataUrl,
+          originalWidth: result.width,
+          originalHeight: result.height,
+        },
+        {
+          width: result.width,
+          height: result.height,
+        }
+      );
 
       showToast(`Upscaled layer to ${result.width} × ${result.height} px (${upscaleFactor}X)`);
     } catch (err: any) {
@@ -291,7 +237,7 @@ export const EnhancementToolsPanel: React.FC = () => {
     }
   };
 
-  // --- 3. Apply Background Remover ---
+  // --- 3. Apply Background Removal (remove.bg Engine) ---
   const handleApplyBgRemover = async () => {
     if (!activeLayer.imageUrl) {
       showToast('Active layer has no raster image.');
@@ -299,24 +245,114 @@ export const EnhancementToolsPanel: React.FC = () => {
     }
     try {
       setIsRemovingBg(true);
-      showToast(`Isolating foreground subject and applying ${bgMode} backdrop...`);
+      showToast(`Isolating subject and applying ${bgMode} backdrop...`);
 
       const processedUrl = await removeOrReplaceBackground(activeLayer.imageUrl, bgMode, {
         color: bgColor,
+        photoUrl: bgPhotoUrl,
         blurRadius: bgBlurRadius,
         threshold: bgThreshold,
+        feather: bgFeather,
+        protectSubject: protectSubject,
+        shadowType: bgShadowType,
+        shadowOpacity: bgShadowOpacity,
+        shadowBlur: bgShadowBlur,
       });
 
       updateLayer(activeLayer.id, {
         imageUrl: processedUrl,
       });
 
-      showToast(`Background processing complete (${bgMode})`);
+      showToast(`Background cutout baked successfully (${bgMode})`);
     } catch (err: any) {
       showToast(`BG Remover error: ${err?.message || 'Failed'}`);
     } finally {
       setIsRemovingBg(false);
     }
+  };
+
+  // --- 3B. Add Cutout as New Project Layer ---
+  const handleAddCutoutAsNewLayer = async () => {
+    if (!activeLayer.imageUrl) {
+      showToast('Active layer has no raster image.');
+      return;
+    }
+    try {
+      setIsRemovingBg(true);
+      showToast('Generating isolated subject layer...');
+
+      const cutoutUrl = await removeOrReplaceBackground(activeLayer.imageUrl, 'transparent', {
+        threshold: bgThreshold,
+        feather: bgFeather,
+        protectSubject: protectSubject,
+      });
+
+      addLayer('image', {
+        name: `${activeLayer.name} (Cutout)`,
+        imageUrl: cutoutUrl,
+        originalWidth: activeLayer.originalWidth,
+        originalHeight: activeLayer.originalHeight,
+      });
+
+      showToast('Added transparent cutout as new top layer!');
+    } catch (err: any) {
+      showToast(`Error adding cutout layer: ${err?.message || 'Failed'}`);
+    } finally {
+      setIsRemovingBg(false);
+    }
+  };
+
+  // --- 3C. Download High-Res PNG Cutout ---
+  const handleDownloadTransparentCutout = async () => {
+    if (!activeLayer.imageUrl) {
+      showToast('Active layer has no raster image.');
+      return;
+    }
+    try {
+      setIsDownloadingCutout(true);
+      showToast('Exporting high-resolution transparent PNG...');
+
+      const outputUrl = await removeOrReplaceBackground(activeLayer.imageUrl, bgMode, {
+        color: bgColor,
+        photoUrl: bgPhotoUrl,
+        blurRadius: bgBlurRadius,
+        threshold: bgThreshold,
+        feather: bgFeather,
+        protectSubject: protectSubject,
+        shadowType: bgShadowType,
+        shadowOpacity: bgShadowOpacity,
+        shadowBlur: bgShadowBlur,
+      });
+
+      const a = document.createElement('a');
+      a.href = outputUrl;
+      a.download = `${activeLayer.name.toLowerCase().replace(/\s+/g, '_')}_removebg_${bgMode}.png`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+
+      showToast('Downloaded cutout PNG successfully!');
+    } catch (err: any) {
+      showToast(`Download error: ${err?.message || 'Failed'}`);
+    } finally {
+      setIsDownloadingCutout(false);
+    }
+  };
+
+  // --- 3D. Upload Custom Photo Backdrop ---
+  const handleCustomPhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      if (typeof event.target?.result === 'string') {
+        setBgPhotoUrl(event.target.result);
+        setBgMode('photo');
+        showToast(`Loaded custom background photo: ${file.name}`);
+      }
+    };
+    reader.readAsDataURL(file);
   };
 
   // --- 4. Apply Skin Retouching ---
@@ -342,7 +378,7 @@ export const EnhancementToolsPanel: React.FC = () => {
         imageUrl: processedDataUrl,
       });
 
-      showToast(`Skin retouching applied (Smooth: ${skinSmoothing}%, Glow: ${skinGlow}%)`);
+      showToast(`Skin retouching baked (Smooth: ${skinSmoothing}%, Glow: ${skinGlow}%)`);
     } catch (err: any) {
       showToast(`Skin Retouch error: ${err?.message || 'Failed'}`);
     } finally {
@@ -350,7 +386,7 @@ export const EnhancementToolsPanel: React.FC = () => {
     }
   };
 
-  // --- 5. Apply Auto Enhance ---
+  // --- 5. Apply Auto-Enhance ---
   const handleApplyAutoEnhance = async () => {
     if (!activeLayer.imageUrl) {
       showToast('Active layer has no raster image.');
@@ -395,7 +431,7 @@ export const EnhancementToolsPanel: React.FC = () => {
             <button
               key={tab.id}
               onClick={() => setActiveEnhanceSection(tab.id as any)}
-              className={`py-2 px-1 rounded flex flex-col items-center justify-center gap-1 transition relative ${
+              className={`py-2 px-1 rounded flex flex-col items-center justify-center gap-1 transition relative cursor-pointer ${
                 isActive
                   ? 'bg-indigo-600 text-white font-bold shadow-md'
                   : 'text-zinc-400 hover:text-white hover:bg-zinc-800/60'
@@ -412,96 +448,28 @@ export const EnhancementToolsPanel: React.FC = () => {
         })}
       </div>
 
-      {/* --- MASTER REAL-TIME LIVE PREVIEW VIEWPORT --- */}
-      <div className="p-3 bg-[#111114] rounded-xl border border-indigo-500/30 shadow-2xl space-y-2.5 overflow-hidden">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-1.5 font-bold text-xs text-white font-mono">
-            <Eye className="w-3.5 h-3.5 text-indigo-400 animate-pulse" />
-            <span className="uppercase tracking-wider">Live Preview Viewport</span>
-          </div>
-
-          <div className="flex items-center gap-1.5 text-[9px] font-mono text-zinc-400">
-            <span className="flex items-center gap-1 px-1.5 py-0.5 bg-black/60 rounded border border-white/10 text-emerald-400 font-semibold">
-              <Activity className="w-2.5 h-2.5" />
-              {renderLatencyMs}ms • Real-time
-            </span>
-          </div>
+      {/* Live in-canvas Status Badge & Quick Compare Bar */}
+      <div className="flex items-center justify-between px-3 py-2 bg-[#121215] rounded-lg border border-indigo-500/20 text-xs">
+        <div className="flex items-center gap-2">
+          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+          <span className="font-mono text-[11px] text-zinc-300">
+            Live preview on canvas: <strong className="text-white uppercase">{activeEnhanceSection.replace('_', ' ')}</strong>
+          </span>
         </div>
 
-        {/* Live Canvas Viewport Box */}
-        <div className="relative rounded-lg overflow-hidden border border-white/10 bg-[#070709] min-h-[160px] max-h-[220px] flex items-center justify-center shadow-inner group">
-          {/* Transparency grid backdrop */}
-          <div
-            className="absolute inset-0 opacity-20 pointer-events-none"
-            style={{
-              backgroundImage:
-                'linear-gradient(45deg, #222 25%, transparent 25%), linear-gradient(-45deg, #222 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #222 75%), linear-gradient(-45deg, transparent 75%, #222 75%)',
-              backgroundSize: '16px 16px',
-              backgroundPosition: '0 0, 0 8px, 8px -8px, -8px 0px',
-            }}
-          />
-
-          <canvas
-            ref={previewCanvasRef}
-            className={`max-w-full max-h-[210px] object-contain block transition-transform duration-150 ${
-              previewZoom === '100%' ? 'scale-125' : previewZoom === '200%' ? 'scale-150' : 'scale-100'
-            }`}
-          />
-
-          {/* Interactive Split Position Bar */}
-          <div className="absolute top-2 left-2 flex items-center gap-1 bg-black/80 backdrop-blur-md px-2 py-0.5 rounded border border-white/20 text-[9px] font-mono text-zinc-300 pointer-events-none">
-            <span className="text-zinc-400">Original</span>
-            <span className="text-white font-bold">|</span>
-            <span className="text-indigo-400 font-bold">Live {activeEnhanceSection.replace('_', ' ').toUpperCase()}</span>
-          </div>
-
-          {/* Quick "Hold to See Original" Button */}
-          <button
-            onMouseDown={() => setIsComparingOriginal(true)}
-            onMouseUp={() => setIsComparingOriginal(false)}
-            onMouseLeave={() => setIsComparingOriginal(false)}
-            onTouchStart={() => setIsComparingOriginal(true)}
-            onTouchEnd={() => setIsComparingOriginal(false)}
-            className="absolute bottom-2 right-2 bg-black/85 hover:bg-zinc-800 text-zinc-200 border border-white/20 text-[9px] font-mono font-bold px-2 py-1 rounded shadow transition active:scale-95 flex items-center gap-1 cursor-pointer select-none"
-            title="Press and hold to view original without enhancements"
-          >
-            <SplitSquareVertical className="w-3 h-3 text-indigo-400" />
-            <span>Hold to Compare</span>
-          </button>
-        </div>
-
-        {/* Live Preview Controls: Split Wipe & Zoom */}
-        <div className="flex items-center justify-between gap-3 text-[10px] font-mono pt-1 text-zinc-400">
-          <div className="flex items-center gap-1.5 flex-1">
-            <span className="text-zinc-500 uppercase text-[9px] font-bold">Split Wipe:</span>
-            <input
-              type="range"
-              min="0"
-              max="100"
-              value={splitPosition}
-              onChange={(e) => setSplitPosition(Number(e.target.value))}
-              className="flex-1 h-1 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-indigo-500"
-              title="Slide to wipe between Before (left) and After (right)"
-            />
-            <span className="text-zinc-300 w-7 text-right">{splitPosition}%</span>
-          </div>
-
-          <div className="flex items-center gap-1">
-            {(['fit', '100%', '200%'] as const).map((z) => (
-              <button
-                key={z}
-                onClick={() => setPreviewZoom(z)}
-                className={`px-1.5 py-0.5 rounded text-[9px] font-mono transition ${
-                  previewZoom === z
-                    ? 'bg-indigo-600 text-white font-bold'
-                    : 'bg-zinc-900 text-zinc-400 hover:text-white'
-                }`}
-              >
-                {z}
-              </button>
-            ))}
-          </div>
-        </div>
+        {/* Hold to Compare button directly on the active canvas */}
+        <button
+          onMouseDown={() => setIsComparingOriginal(true)}
+          onMouseUp={() => setIsComparingOriginal(false)}
+          onMouseLeave={() => setIsComparingOriginal(false)}
+          onTouchStart={() => setIsComparingOriginal(true)}
+          onTouchEnd={() => setIsComparingOriginal(false)}
+          className="px-2 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 border border-white/10 rounded text-[10px] font-mono font-bold transition flex items-center gap-1 cursor-pointer select-none active:scale-95"
+          title="Press and hold to view original without enhancements on the main canvas"
+        >
+          <SplitSquareVertical className="w-3 h-3 text-indigo-400" />
+          <span>Hold to Compare</span>
+        </button>
       </div>
 
       {/* --- 1. NOISE REDUCTION TOOL --- */}
@@ -520,7 +488,7 @@ export const EnhancementToolsPanel: React.FC = () => {
           </div>
 
           <p className="text-[11px] text-zinc-400 leading-relaxed">
-            Eliminates high-ISO digital grain and sensor noise while retaining crisp object edges and sharp focus details.
+            Eliminates high-ISO digital grain and sensor noise while retaining crisp object edges and sharp focus details directly on the canvas image.
           </p>
 
           <div className="space-y-2.5">
@@ -562,7 +530,7 @@ export const EnhancementToolsPanel: React.FC = () => {
                 setColorDenoise(50);
                 showToast('Reset De-Noise settings');
               }}
-              className="py-2 px-3 bg-zinc-900 hover:bg-zinc-800 border border-[#27272a] text-zinc-400 hover:text-white rounded text-xs font-mono transition"
+              className="py-2 px-3 bg-zinc-900 hover:bg-zinc-800 border border-[#27272a] text-zinc-400 hover:text-white rounded text-xs font-mono transition cursor-pointer"
               title="Reset"
             >
               <RotateCcw className="w-3.5 h-3.5" />
@@ -570,7 +538,7 @@ export const EnhancementToolsPanel: React.FC = () => {
             <button
               onClick={handleApplyDenoise}
               disabled={isDenoising}
-              className="flex-1 py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded text-xs flex items-center justify-center gap-2 uppercase tracking-wider transition active:scale-98 disabled:opacity-50"
+              className="flex-1 py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded text-xs flex items-center justify-center gap-2 uppercase tracking-wider transition active:scale-98 disabled:opacity-50 cursor-pointer"
             >
               {isDenoising ? (
                 <>
@@ -614,7 +582,7 @@ export const EnhancementToolsPanel: React.FC = () => {
             <div className="grid grid-cols-2 gap-2">
               <button
                 onClick={() => setUpscaleFactor(2)}
-                className={`py-2 px-3 rounded text-xs font-mono font-bold flex flex-col items-center justify-center border transition ${
+                className={`py-2 px-3 rounded text-xs font-mono font-bold flex flex-col items-center justify-center border transition cursor-pointer ${
                   upscaleFactor === 2
                     ? 'bg-emerald-600 text-white border-emerald-400 shadow'
                     : 'bg-zinc-900 border-[#27272a] text-zinc-400 hover:text-white'
@@ -628,7 +596,7 @@ export const EnhancementToolsPanel: React.FC = () => {
 
               <button
                 onClick={() => setUpscaleFactor(4)}
-                className={`py-2 px-3 rounded text-xs font-mono font-bold flex flex-col items-center justify-center border transition ${
+                className={`py-2 px-3 rounded text-xs font-mono font-bold flex flex-col items-center justify-center border transition cursor-pointer ${
                   upscaleFactor === 4
                     ? 'bg-emerald-600 text-white border-emerald-400 shadow'
                     : 'bg-zinc-900 border-[#27272a] text-zinc-400 hover:text-white'
@@ -645,7 +613,7 @@ export const EnhancementToolsPanel: React.FC = () => {
           <button
             onClick={handleApplyUpscale}
             disabled={isUpscaling}
-            className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded text-xs flex items-center justify-center gap-2 uppercase tracking-wider transition active:scale-98 disabled:opacity-50"
+            className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded text-xs flex items-center justify-center gap-2 uppercase tracking-wider transition active:scale-98 disabled:opacity-50 cursor-pointer shadow-lg"
           >
             {isUpscaling ? (
               <>
@@ -662,134 +630,521 @@ export const EnhancementToolsPanel: React.FC = () => {
         </div>
       )}
 
-      {/* --- 3. BG REMOVER TOOL --- */}
+      {/* --- 3. REMOVE.BG BACKGROUND REMOVER & STUDIO COMPOSITOR --- */}
       {activeEnhanceSection === 'bg_remover' && (
-        <div className="p-3.5 bg-[#18181b] rounded-lg border border-[#27272a] space-y-3">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-1.5">
-              <Scissors className="w-4 h-4 text-purple-400" />
-              <span className="text-xs font-bold uppercase tracking-wider text-white">
-                AI Background Remover & Studio Compositor
-              </span>
+        <div className="p-3.5 bg-[#18181b] rounded-xl border border-purple-500/30 space-y-3.5 shadow-lg shadow-purple-950/20">
+          {/* remove.bg Branding Header */}
+          <div className="flex items-center justify-between pb-2 border-b border-[#27272a]">
+            <div className="flex items-center gap-2">
+              <div className="w-6 h-6 rounded-lg bg-gradient-to-br from-purple-500 to-indigo-600 flex items-center justify-center shadow-md">
+                <Scissors className="w-3.5 h-3.5 text-white" />
+              </div>
+              <div>
+                <span className="text-xs font-black tracking-wide text-white block">
+                  REMOVE<span className="text-purple-400">.BG</span> STUDIO
+                </span>
+                <span className="text-[9px] text-zinc-400 font-medium">100% Automatic AI Cutout</span>
+              </div>
             </div>
-            <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-black text-purple-400 border border-[#27272a]">
-              SEGMENTATION
+            <span className="text-[9px] font-mono px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 font-bold">
+              READY
             </span>
           </div>
 
-          <p className="text-[11px] text-zinc-400 leading-relaxed">
-            Segments foreground subjects and generates transparent cutouts, studio solid backdrops, or optical bokeh blurs.
-          </p>
+          {/* Tab Navigation: Removed BG vs Original Toggle */}
+          <div className="grid grid-cols-2 gap-1 p-0.5 bg-black/50 rounded-lg border border-[#27272a]">
+            <button
+              onClick={() => setIsComparingOriginal(false)}
+              className={`py-1.5 px-2 rounded-md text-[11px] font-bold text-center transition cursor-pointer ${
+                !isComparingOriginal
+                  ? 'bg-purple-600 text-white shadow'
+                  : 'text-zinc-400 hover:text-white'
+              }`}
+            >
+              Removed Background
+            </button>
+            <button
+              onClick={() => setIsComparingOriginal(true)}
+              className={`py-1.5 px-2 rounded-md text-[11px] font-bold text-center transition cursor-pointer ${
+                isComparingOriginal
+                  ? 'bg-zinc-700 text-white shadow'
+                  : 'text-zinc-400 hover:text-white'
+              }`}
+            >
+              Original Photo
+            </button>
+          </div>
 
-          <div className="space-y-2">
-            <span className="text-[10px] uppercase font-bold text-zinc-400 block">
-              Replacement Mode
-            </span>
-            <div className="grid grid-cols-2 gap-1.5">
-              {[
-                { id: 'transparent', label: 'Transparent PNG' },
-                { id: 'blur', label: 'Bokeh Blur Backdrop' },
-                { id: 'color', label: 'Studio Solid Color' },
-                { id: 'gradient', label: 'Studio Gradient' },
-              ].map((m) => (
+          {/* Sub-tool Tabs: Background | Erase/Restore | Shadows */}
+          <div className="flex items-center gap-1 border-b border-[#27272a] pb-2">
+            {[
+              { id: 'background', label: 'Background', icon: Palette },
+              { id: 'erase_restore', label: 'Erase / Restore', icon: Eraser },
+              { id: 'shadow', label: 'Shadows', icon: Sun },
+            ].map((st) => {
+              const Icon = st.icon;
+              const isSelected = bgTab === st.id;
+              return (
                 <button
-                  key={m.id}
-                  onClick={() => setBgMode(m.id as any)}
-                  className={`py-1.5 px-2 rounded text-[11px] font-medium border text-left transition ${
-                    bgMode === m.id
-                      ? 'bg-purple-600/30 border-purple-400 text-white font-bold'
+                  key={st.id}
+                  onClick={() => setBgTab(st.id as any)}
+                  className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg text-[10px] font-bold uppercase tracking-wider transition cursor-pointer ${
+                    isSelected
+                      ? 'bg-zinc-800 text-purple-300 border border-purple-500/30'
+                      : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900'
+                  }`}
+                >
+                  <Icon className="w-3 h-3" />
+                  <span>{st.label}</span>
+                </button>
+              );
+            })}
+          </div>
+
+          {/* TAB 1: BACKGROUND OPTIONS */}
+          {bgTab === 'background' && (
+            <div className="space-y-3">
+              {/* 4 Mode Buttons */}
+              <div className="grid grid-cols-4 gap-1.5">
+                {[
+                  { id: 'transparent', label: 'Transparent', icon: EyeOff },
+                  { id: 'photo', label: 'Photo', icon: ImageIcon },
+                  { id: 'color', label: 'Color', icon: Palette },
+                  { id: 'blur', label: 'Blur', icon: SlidersHorizontal },
+                ].map((m) => {
+                  const Icon = m.icon;
+                  const isActive = bgMode === m.id;
+                  return (
+                    <button
+                      key={m.id}
+                      onClick={() => setBgMode(m.id as any)}
+                      className={`flex flex-col items-center justify-center p-2 rounded-lg border text-center transition cursor-pointer ${
+                        isActive
+                          ? 'bg-purple-600/20 border-purple-400 text-purple-200 font-bold shadow-inner'
+                          : 'bg-zinc-900 border-[#27272a] text-zinc-400 hover:text-white hover:border-zinc-700'
+                      }`}
+                    >
+                      <Icon className="w-3.5 h-3.5 mb-1" />
+                      <span className="text-[10px]">{m.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* MODE 1: TRANSPARENT PNG */}
+              {bgMode === 'transparent' && (
+                <div className="p-3 bg-zinc-900/80 rounded-lg border border-[#27272a] flex items-center gap-3">
+                  <div
+                    className="w-10 h-10 rounded-lg border border-white/20 shrink-0"
+                    style={{
+                      backgroundImage:
+                        'repeating-conic-gradient(#27272a 0% 25%, #18181b 0% 50%)',
+                      backgroundSize: '10px 10px',
+                    }}
+                  />
+                  <div>
+                    <span className="text-[11px] font-bold text-white block">
+                      Transparent PNG Cutout
+                    </span>
+                    <span className="text-[9px] text-zinc-400">
+                      Standard transparent backdrop with zero edge halos.
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              {/* MODE 2: PHOTO BACKDROPS */}
+              {bgMode === 'photo' && (
+                <div className="space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] uppercase font-bold text-zinc-400">
+                      Curated Photo Backdrops
+                    </span>
+                    <button
+                      onClick={() => fileInputRef.current?.click()}
+                      className="flex items-center gap-1 text-[10px] font-bold text-purple-400 hover:text-purple-300 cursor-pointer"
+                    >
+                      <Upload className="w-3 h-3" />
+                      <span>Upload Photo</span>
+                    </button>
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept="image/*"
+                      onChange={handleCustomPhotoUpload}
+                      className="hidden"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-4 gap-1.5 max-h-40 overflow-y-auto pr-1">
+                    {REMOVE_BG_PRESET_PHOTOS.map((p) => {
+                      const isSelected = bgPhotoUrl === p.url;
+                      return (
+                        <button
+                          key={p.id}
+                          onClick={() => setBgPhotoUrl(p.url)}
+                          className={`relative rounded-md overflow-hidden aspect-video border transition cursor-pointer group ${
+                            isSelected
+                              ? 'ring-2 ring-purple-400 border-transparent scale-98'
+                              : 'border-[#27272a] opacity-75 hover:opacity-100'
+                          }`}
+                        >
+                          <img
+                            src={p.thumbnail}
+                            alt={p.name}
+                            className="w-full h-full object-cover"
+                            referrerPolicy="no-referrer"
+                          />
+                          <span className="absolute inset-x-0 bottom-0 text-[8px] bg-black/70 text-white font-medium px-1 py-0.5 truncate text-left">
+                            {p.name}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* MODE 3: SOLID STUDIO COLORS */}
+              {bgMode === 'color' && (
+                <div className="space-y-2">
+                  <span className="text-[10px] uppercase font-bold text-zinc-400 block">
+                    Studio Color Palette
+                  </span>
+                  <div className="grid grid-cols-6 gap-2">
+                    {[
+                      { color: '#ffffff', name: 'Pure White' },
+                      { color: '#f3f4f6', name: 'Studio Gray' },
+                      { color: '#334155', name: 'Slate Gray' },
+                      { color: '#18181b', name: 'Obsidian' },
+                      { color: '#000000', name: 'Pitch Black' },
+                      { color: '#2563eb', name: 'Electric Blue' },
+                      { color: '#059669', name: 'Emerald' },
+                      { color: '#f97316', name: 'Warm Orange' },
+                      { color: '#ec4899', name: 'Soft Rose' },
+                      { color: '#7c3aed', name: 'Vibrant Purple' },
+                      { color: '#fef3c7', name: 'Warm Cream' },
+                      { color: '#6ee7b7', name: 'Mint Green' },
+                    ].map((c) => (
+                      <button
+                        key={c.color}
+                        onClick={() => setBgColor(c.color)}
+                        className={`w-full aspect-square rounded-lg border border-white/20 transition cursor-pointer flex items-center justify-center ${
+                          bgColor === c.color ? 'ring-2 ring-purple-400 scale-105 shadow-md' : 'opacity-80 hover:opacity-100'
+                        }`}
+                        style={{ backgroundColor: c.color }}
+                        title={c.name}
+                      >
+                        {bgColor === c.color && (
+                          <Check className={`w-3 h-3 ${c.color === '#ffffff' || c.color === '#fef3c7' || c.color === '#6ee7b7' ? 'text-black' : 'text-white'}`} />
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="flex items-center justify-between p-2 bg-zinc-900 rounded-lg border border-[#27272a]">
+                    <span className="text-[10px] text-zinc-400 font-medium">Custom Color</span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] font-mono text-zinc-300">{bgColor}</span>
+                      <input
+                        type="color"
+                        value={bgColor}
+                        onChange={(e) => setBgColor(e.target.value)}
+                        className="w-6 h-6 rounded bg-transparent border-0 cursor-pointer"
+                        title="Pick custom color"
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* MODE 4: BOKEH BLUR BACKDROP */}
+              {bgMode === 'blur' && (
+                <div className="space-y-2.5">
+                  <div className="grid grid-cols-4 gap-1">
+                    {[
+                      { radius: 0, label: 'No Blur' },
+                      { radius: 8, label: 'Soft' },
+                      { radius: 24, label: 'Portrait' },
+                      { radius: 48, label: 'Cinematic' },
+                    ].map((b) => (
+                      <button
+                        key={b.radius}
+                        onClick={() => setBgBlurRadius(b.radius)}
+                        className={`py-1 px-1 rounded text-[10px] font-semibold border transition cursor-pointer text-center ${
+                          bgBlurRadius === b.radius
+                            ? 'bg-purple-600/30 border-purple-400 text-white'
+                            : 'bg-zinc-900 border-[#27272a] text-zinc-400 hover:text-white'
+                        }`}
+                      >
+                        {b.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  <div>
+                    <div className="flex justify-between text-[10px] uppercase font-bold text-zinc-400 mb-1">
+                      <span>Blur Radius</span>
+                      <span className="font-mono text-white">{bgBlurRadius} px</span>
+                    </div>
+                    <input
+                      type="range"
+                      min="0"
+                      max="60"
+                      value={bgBlurRadius}
+                      onChange={(e) => setBgBlurRadius(Number(e.target.value))}
+                      className="w-full h-1 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-purple-500"
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* TAB 2: ERASE / RESTORE BRUSH */}
+          {bgTab === 'erase_restore' && (
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-1.5">
+                <button
+                  onClick={() => setBrushMode('erase')}
+                  className={`flex items-center justify-center gap-2 py-2 px-3 rounded-lg border text-xs font-bold transition cursor-pointer ${
+                    brushMode === 'erase'
+                      ? 'bg-red-600/20 border-red-500 text-red-300'
                       : 'bg-zinc-900 border-[#27272a] text-zinc-400 hover:text-white'
                   }`}
                 >
-                  {m.label}
+                  <Eraser className="w-3.5 h-3.5" />
+                  <span>Erase BG</span>
                 </button>
-              ))}
-            </div>
-          </div>
+                <button
+                  onClick={() => setBrushMode('restore')}
+                  className={`flex items-center justify-center gap-2 py-2 px-3 rounded-lg border text-xs font-bold transition cursor-pointer ${
+                    brushMode === 'restore'
+                      ? 'bg-emerald-600/20 border-emerald-500 text-emerald-300'
+                      : 'bg-zinc-900 border-[#27272a] text-zinc-400 hover:text-white'
+                  }`}
+                >
+                  <Paintbrush className="w-3.5 h-3.5" />
+                  <span>Restore Subject</span>
+                </button>
+              </div>
 
-          {bgMode === 'color' && (
-            <div className="space-y-1.5">
-              <span className="text-[10px] uppercase font-bold text-zinc-400 block">
-                Backdrop Color Preset
-              </span>
-              <div className="flex items-center gap-2">
-                {[
-                  { color: '#000000', label: 'Black' },
-                  { color: '#ffffff', label: 'White' },
-                  { color: '#1e293b', label: 'Slate' },
-                  { color: '#4f46e5', label: 'Indigo' },
-                  { color: '#059669', label: 'Emerald' },
-                ].map((c) => (
-                  <button
-                    key={c.color}
-                    onClick={() => setBgColor(c.color)}
-                    className={`w-6 h-6 rounded-full border border-white/20 transition ${
-                      bgColor === c.color ? 'ring-2 ring-purple-400 scale-110' : 'opacity-70'
-                    }`}
-                    style={{ backgroundColor: c.color }}
-                    title={c.label}
-                  />
-                ))}
+              <div>
+                <div className="flex justify-between text-[10px] uppercase font-bold text-zinc-400 mb-1">
+                  <span>Brush Size</span>
+                  <span className="font-mono text-white">{brushSize} px</span>
+                </div>
                 <input
-                  type="color"
-                  value={bgColor}
-                  onChange={(e) => setBgColor(e.target.value)}
-                  className="w-6 h-6 rounded bg-transparent border-0 cursor-pointer"
-                  title="Custom Color"
+                  type="range"
+                  min="8"
+                  max="100"
+                  value={brushSize}
+                  onChange={(e) => setBrushSize(Number(e.target.value))}
+                  className="w-full h-1 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-purple-500"
                 />
               </div>
-            </div>
-          )}
 
-          {bgMode === 'blur' && (
-            <div>
-              <div className="flex justify-between text-[10px] uppercase font-bold text-zinc-400 mb-1">
-                <span>Depth Blur Radius</span>
-                <span className="font-mono text-white">{bgBlurRadius} px</span>
+              <div>
+                <div className="flex justify-between text-[10px] uppercase font-bold text-zinc-400 mb-1">
+                  <span>Brush Softness & Feather</span>
+                  <span className="font-mono text-white">{brushSoftness}%</span>
+                </div>
+                <input
+                  type="range"
+                  min="0"
+                  max="100"
+                  value={brushSoftness}
+                  onChange={(e) => setBrushSoftness(Number(e.target.value))}
+                  className="w-full h-1 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-purple-500"
+                />
               </div>
-              <input
-                type="range"
-                min="5"
-                max="60"
-                value={bgBlurRadius}
-                onChange={(e) => setBgBlurRadius(Number(e.target.value))}
-                className="w-full h-1 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-purple-500"
-              />
+
+              <div className="p-2.5 bg-zinc-900/90 rounded-lg border border-[#27272a] text-[10px] text-zinc-400 leading-relaxed">
+                Tip: Use <span className="text-purple-300 font-bold">Erase</span> to clean up edge artifacts, or <span className="text-emerald-300 font-bold">Restore</span> to recover fine hair strands, jewelry, and clothing boundaries.
+              </div>
             </div>
           )}
 
-          <div>
-            <div className="flex justify-between text-[10px] uppercase font-bold text-zinc-400 mb-1">
-              <span>Edge Extraction Sensitivity</span>
-              <span className="font-mono text-white">{bgThreshold}</span>
+          {/* TAB 3: SHADOW EFFECTS */}
+          {bgTab === 'shadow' && (
+            <div className="space-y-3">
+              <span className="text-[10px] uppercase font-bold text-zinc-400 block">
+                Subject Depth & Cast Shadow
+              </span>
+              <div className="grid grid-cols-2 gap-1.5">
+                {[
+                  { id: 'none', label: 'No Shadow' },
+                  { id: 'drop', label: 'Drop Shadow' },
+                  { id: 'floor', label: 'Floor Cast' },
+                  { id: 'floating', label: 'Floating Depth' },
+                ].map((s) => (
+                  <button
+                    key={s.id}
+                    onClick={() => setBgShadowType(s.id as any)}
+                    className={`py-1.5 px-2 rounded text-[11px] font-semibold border text-left transition cursor-pointer ${
+                      bgShadowType === s.id
+                        ? 'bg-purple-600/30 border-purple-400 text-white font-bold'
+                        : 'bg-zinc-900 border-[#27272a] text-zinc-400 hover:text-white'
+                    }`}
+                  >
+                    {s.label}
+                  </button>
+                ))}
+              </div>
+
+              {bgShadowType !== 'none' && (
+                <div className="space-y-2 pt-1">
+                  <div>
+                    <div className="flex justify-between text-[10px] uppercase font-bold text-zinc-400 mb-1">
+                      <span>Shadow Opacity</span>
+                      <span className="font-mono text-white">{bgShadowOpacity}%</span>
+                    </div>
+                    <input
+                      type="range"
+                      min="10"
+                      max="100"
+                      value={bgShadowOpacity}
+                      onChange={(e) => setBgShadowOpacity(Number(e.target.value))}
+                      className="w-full h-1 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-purple-500"
+                    />
+                  </div>
+
+                  <div>
+                    <div className="flex justify-between text-[10px] uppercase font-bold text-zinc-400 mb-1">
+                      <span>Shadow Softness (Blur)</span>
+                      <span className="font-mono text-white">{bgShadowBlur} px</span>
+                    </div>
+                    <input
+                      type="range"
+                      min="5"
+                      max="60"
+                      value={bgShadowBlur}
+                      onChange={(e) => setBgShadowBlur(Number(e.target.value))}
+                      className="w-full h-1 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-purple-500"
+                    />
+                  </div>
+                </div>
+              )}
             </div>
-            <input
-              type="range"
-              min="20"
-              max="90"
-              value={bgThreshold}
-              onChange={(e) => setBgThreshold(Number(e.target.value))}
-              className="w-full h-1 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-purple-500"
-            />
+          )}
+
+          {/* Collapsible Advanced Precision Settings */}
+          <div className="pt-1 border-t border-[#27272a]">
+            <button
+              onClick={() => setShowAdvancedSettings(!showAdvancedSettings)}
+              className="flex items-center justify-between w-full py-1 text-[10px] font-bold text-zinc-400 hover:text-zinc-200 transition cursor-pointer"
+            >
+              <div className="flex items-center gap-1.5">
+                <Sliders className="w-3 h-3" />
+                <span>Advanced Edge Precision & Saliency</span>
+              </div>
+              {showAdvancedSettings ? (
+                <ChevronUp className="w-3 h-3" />
+              ) : (
+                <ChevronDown className="w-3 h-3" />
+              )}
+            </button>
+
+            {showAdvancedSettings && (
+              <div className="space-y-2.5 pt-2">
+                <div>
+                  <div className="flex justify-between text-[10px] uppercase font-bold text-zinc-400 mb-1">
+                    <span>Edge Sensitivity</span>
+                    <span className="font-mono text-white">{bgThreshold}</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="20"
+                    max="90"
+                    value={bgThreshold}
+                    onChange={(e) => setBgThreshold(Number(e.target.value))}
+                    className="w-full h-1 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-purple-500"
+                  />
+                </div>
+
+                <div>
+                  <div className="flex justify-between text-[10px] uppercase font-bold text-zinc-400 mb-1">
+                    <span>Edge Feathering</span>
+                    <span className="font-mono text-white">{bgFeather} px</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="0"
+                    max="10"
+                    value={bgFeather}
+                    onChange={(e) => setBgFeather(Number(e.target.value))}
+                    className="w-full h-1 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-purple-500"
+                  />
+                </div>
+
+                <label className="flex items-center gap-2 p-2 bg-zinc-900/80 rounded border border-[#27272a] cursor-pointer hover:bg-zinc-800/80 transition">
+                  <input
+                    type="checkbox"
+                    checked={protectSubject}
+                    onChange={(e) => setProtectSubject(e.target.checked)}
+                    className="w-3.5 h-3.5 rounded bg-zinc-800 border-zinc-700 text-purple-600 focus:ring-0 cursor-pointer"
+                  />
+                  <div className="flex flex-col">
+                    <span className="text-[11px] font-bold text-zinc-200 flex items-center gap-1">
+                      <ShieldCheck className="w-3 h-3 text-emerald-400" />
+                      Face & Subject Protection
+                    </span>
+                    <span className="text-[9px] text-zinc-400">
+                      Locks skin tones, hair strands, and core clothing contours.
+                    </span>
+                  </div>
+                </label>
+              </div>
+            )}
           </div>
 
-          <button
-            onClick={handleApplyBgRemover}
-            disabled={isRemovingBg}
-            className="w-full py-2 bg-purple-600 hover:bg-purple-500 text-white font-bold rounded text-xs flex items-center justify-center gap-2 uppercase tracking-wider transition active:scale-98 disabled:opacity-50"
-          >
-            {isRemovingBg ? (
-              <>
-                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                <span>Segmenting Subject...</span>
-              </>
-            ) : (
-              <>
-                <Scissors className="w-3.5 h-3.5" />
-                <span>Apply Background ({bgMode})</span>
-              </>
-            )}
-          </button>
+          {/* Action Buttons (Remove.bg Style) */}
+          <div className="space-y-1.5 pt-2 border-t border-[#27272a]">
+            {/* 1-Click High-Res Download (Transparent / With Background) */}
+            <button
+              onClick={handleDownloadTransparentCutout}
+              disabled={isDownloadingCutout || isRemovingBg}
+              className="w-full py-2.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-bold rounded-lg text-xs flex items-center justify-center gap-2 tracking-wide transition active:scale-98 disabled:opacity-50 cursor-pointer shadow-lg shadow-purple-950/40"
+            >
+              {isDownloadingCutout ? (
+                <>
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  <span>Preparing High-Res Export...</span>
+                </>
+              ) : (
+                <>
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Download High-Res PNG ({bgMode})</span>
+                </>
+              )}
+            </button>
+
+            <div className="grid grid-cols-2 gap-1.5">
+              {/* Add Cutout as New Layer */}
+              <button
+                onClick={handleAddCutoutAsNewLayer}
+                disabled={isRemovingBg}
+                className="py-2 px-2 bg-zinc-900 hover:bg-zinc-800 border border-[#27272a] hover:border-zinc-600 text-zinc-200 font-semibold rounded-lg text-[11px] flex items-center justify-center gap-1.5 transition active:scale-98 disabled:opacity-50 cursor-pointer"
+                title="Creates a new isolated transparent layer in the project stack"
+              >
+                <Plus className="w-3.5 h-3.5 text-purple-400" />
+                <span>Add Cutout Layer</span>
+              </button>
+
+              {/* Bake to Current Layer */}
+              <button
+                onClick={handleApplyBgRemover}
+                disabled={isRemovingBg}
+                className="py-2 px-2 bg-zinc-900 hover:bg-zinc-800 border border-[#27272a] hover:border-zinc-600 text-zinc-200 font-semibold rounded-lg text-[11px] flex items-center justify-center gap-1.5 transition active:scale-98 disabled:opacity-50 cursor-pointer"
+              >
+                {isRemovingBg ? (
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Check className="w-3.5 h-3.5 text-emerald-400" />
+                )}
+                <span>Bake to Layer</span>
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -809,7 +1164,7 @@ export const EnhancementToolsPanel: React.FC = () => {
           </div>
 
           <p className="text-[11px] text-zinc-400 leading-relaxed">
-            Frequency-separation dermal algorithm softens wrinkles and spots while preserving natural skin pores, eyelashes, and lip structure.
+            Frequency-separation dermal algorithm softens wrinkles and spots while preserving natural skin pores and structure directly on canvas.
           </p>
 
           <div className="space-y-2.5">
@@ -867,7 +1222,7 @@ export const EnhancementToolsPanel: React.FC = () => {
                 setSkinGlow(30);
                 showToast('Reset Skin Retouching settings');
               }}
-              className="py-2 px-3 bg-zinc-900 hover:bg-zinc-800 border border-[#27272a] text-zinc-400 hover:text-white rounded text-xs font-mono transition"
+              className="py-2 px-3 bg-zinc-900 hover:bg-zinc-800 border border-[#27272a] text-zinc-400 hover:text-white rounded text-xs font-mono transition cursor-pointer"
               title="Reset"
             >
               <RotateCcw className="w-3.5 h-3.5" />
@@ -875,7 +1230,7 @@ export const EnhancementToolsPanel: React.FC = () => {
             <button
               onClick={handleApplySkinRetouching}
               disabled={isSkinRetouching}
-              className="flex-1 py-2 bg-amber-600 hover:bg-amber-500 text-white font-bold rounded text-xs flex items-center justify-center gap-2 uppercase tracking-wider transition active:scale-98 disabled:opacity-50"
+              className="flex-1 py-2 bg-amber-600 hover:bg-amber-500 text-white font-bold rounded text-xs flex items-center justify-center gap-2 uppercase tracking-wider transition active:scale-98 disabled:opacity-50 cursor-pointer shadow-lg"
             >
               {isSkinRetouching ? (
                 <>
@@ -909,12 +1264,12 @@ export const EnhancementToolsPanel: React.FC = () => {
           </div>
 
           <p className="text-[11px] text-zinc-400 leading-relaxed">
-            Performs intelligent dynamic range stretching, white-point recalibration, shadow detail recovery, and highlight roll-off compression in one click.
+            Performs intelligent dynamic range stretching, white-point recalibration, shadow detail recovery, and highlight roll-off compression directly on canvas.
           </p>
 
           <button
             onClick={handleApplyAutoEnhance}
-            className="w-full py-2.5 bg-cyan-600 hover:bg-cyan-500 text-white font-bold rounded text-xs flex items-center justify-center gap-2 uppercase tracking-wider transition active:scale-98 shadow-md"
+            className="w-full py-2.5 bg-cyan-600 hover:bg-cyan-500 text-white font-bold rounded text-xs flex items-center justify-center gap-2 uppercase tracking-wider transition active:scale-98 shadow-md cursor-pointer"
           >
             <Zap className="w-3.5 h-3.5" />
             <span>Apply Smart Auto-Enhance to Layer</span>

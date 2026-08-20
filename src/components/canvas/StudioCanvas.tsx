@@ -33,7 +33,12 @@ export const StudioCanvas: React.FC = () => {
     splitCompare,
     splitPosition,
     applyPreset,
+    liveEnhancement,
+    updateLiveEnhancement,
+    resetLiveEnhancement,
     showToast,
+    setPendingImportFile,
+    setShowImageImportModal,
   } = useStudio();
 
   const containerRef = useRef<HTMLDivElement>(null);
@@ -77,14 +82,17 @@ export const StudioCanvas: React.FC = () => {
     await renderProjectToCanvas(canvasRef.current, project, {
       showComparisonSplit: splitCompare,
       comparisonPosition: splitPosition,
+      liveEnhancement: liveEnhancement,
+      activeLayerId: project.activeLayerId,
     });
-  }, [project, splitCompare, splitPosition]);
+  }, [project, splitCompare, splitPosition, liveEnhancement]);
 
   useEffect(() => {
     renderCanvas();
   }, [renderCanvas]);
 
-  // Handle Pan
+
+  // Handle Pan (Mouse & Touch)
   const handleMouseDown = (e: React.MouseEvent) => {
     if (e.button === 0 && (activeTool === 'move' || e.altKey)) {
       setIsPanning(true);
@@ -108,29 +116,66 @@ export const StudioCanvas: React.FC = () => {
     setIsPanning(false);
   };
 
-  // Handle Zoom with Wheel
-  const handleWheel = (e: React.WheelEvent) => {
-    e.preventDefault();
-    const delta = e.deltaY > 0 ? -0.1 : 0.1;
-    setZoomLevel((prev) => Math.min(4, Math.max(0.2, (prev ?? 1) + delta)));
+  const handleTouchStart = (e: React.TouchEvent) => {
+    if (e.touches.length === 1) {
+      setIsPanning(true);
+      setPanStart({
+        x: e.touches[0].clientX - (canvasPan?.x ?? 0),
+        y: e.touches[0].clientY - (canvasPan?.y ?? 0),
+      });
+    }
   };
 
-  // Center & Fit Canvas
-  const handleFitToScreen = () => {
+  const handleTouchMove = (e: React.TouchEvent) => {
+    if (isPanning && e.touches.length === 1) {
+      setCanvasPan({
+        x: e.touches[0].clientX - panStart.x,
+        y: e.touches[0].clientY - panStart.y,
+      });
+    }
+  };
+
+  const handleTouchEnd = () => {
+    setIsPanning(false);
+  };
+
+  // Handle Smooth Multiplicative Zoom with Mouse Wheel / Trackpad
+  const handleWheel = (e: React.WheelEvent) => {
+    e.preventDefault();
+    const factor = e.deltaY > 0 ? 0.88 : 1.14;
+    setZoomLevel((prev) => {
+      const current = prev ?? 1;
+      const next = current * factor;
+      return Math.min(8.0, Math.max(0.01, next));
+    });
+  };
+
+  // Center & Fit Canvas within viewport
+  const handleFitToScreen = useCallback(() => {
     if (!containerRef.current || !project) return;
     const { clientWidth, clientHeight } = containerRef.current;
-    if (clientWidth <= 100 || clientHeight <= 100) {
-      setZoomLevel(0.6);
-      setCanvasPan({ x: 0, y: -25 });
-      return;
-    }
-    const padding = 80;
-    const scaleX = (clientWidth - padding) / (project.width || 1200);
-    const scaleY = (clientHeight - padding - 120) / (project.height || 800);
-    const fitZoom = Math.min(scaleX, scaleY, 1);
-    setZoomLevel(Math.max(0.2, fitZoom));
-    setCanvasPan({ x: 0, y: -25 });
-  };
+    if (clientWidth <= 50 || clientHeight <= 50) return;
+
+    // Safety padding for toolbar (top ~60px), profiles carousel (bottom ~110px), margins (~40px)
+    const paddingX = 64;
+    const paddingY = 160;
+
+    const availableW = Math.max(60, clientWidth - paddingX);
+    const availableH = Math.max(60, clientHeight - paddingY);
+
+    const projW = project.width || 1200;
+    const projH = project.height || 800;
+
+    const scaleX = availableW / projW;
+    const scaleY = availableH / projH;
+    const fitZoom = Math.min(scaleX, scaleY);
+
+    // Clamp fitZoom cleanly between 0.01 (1%) and 1.5 (150%)
+    const safeFitZoom = Math.max(0.01, Math.min(fitZoom, 1.5));
+
+    setZoomLevel(safeFitZoom);
+    setCanvasPan({ x: 0, y: -18 });
+  }, [project?.width, project?.height]);
 
   useEffect(() => {
     handleFitToScreen();
@@ -140,7 +185,7 @@ export const StudioCanvas: React.FC = () => {
     });
     ro.observe(containerRef.current);
     return () => ro.disconnect();
-  }, [project?.width, project?.height]);
+  }, [handleFitToScreen]);
 
   // Safe layer transform helper
   const updateLayerTransform = (layerId: string, transformUpdates: Partial<LayerTransform>) => {
@@ -390,8 +435,20 @@ export const StudioCanvas: React.FC = () => {
       onMouseDown={handleMouseDown}
       onMouseMove={handleMouseMove}
       onMouseUp={handleMouseUp}
+      onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={handleTouchEnd}
       onWheel={handleWheel}
-      className="flex-1 h-full w-full bg-[#121214] overflow-hidden relative flex flex-col items-center justify-center select-none"
+      onDragOver={(e) => e.preventDefault()}
+      onDrop={(e) => {
+        e.preventDefault();
+        const file = e.dataTransfer.files?.[0];
+        if (file && file.type.startsWith('image/')) {
+          setPendingImportFile(file);
+          setShowImageImportModal(true);
+        }
+      }}
+      className="flex-1 h-full w-full bg-[#121214] overflow-hidden relative flex flex-col items-center justify-center select-none touch-none"
     >
       {/* Top Floating Precision Tool Palette */}
       <div className="absolute top-4 left-4 z-20 flex items-center gap-1.5 bg-[#18181b]/90 backdrop-blur-md p-1 rounded-lg border border-[#27272a] shadow-2xl">
@@ -526,74 +583,120 @@ export const StudioCanvas: React.FC = () => {
         </div>
       )}
 
+      {/* Top Center Enhancement Live Preview Bar */}
+      {liveEnhancement.activeTool !== 'none' && activeTool !== 'crop' && (
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-30 flex items-center gap-2.5 bg-[#18181b]/95 backdrop-blur-md px-3.5 py-2 rounded-xl border border-indigo-500/60 text-xs shadow-2xl animate-in fade-in slide-in-from-top-2">
+          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+          <span className="text-[11px] font-mono text-zinc-300">
+            Live Preview: <strong className="text-white uppercase">{liveEnhancement.activeTool.replace('_', ' ')}</strong>
+          </span>
+
+          <div className="w-px h-3.5 bg-[#27272a] mx-0.5" />
+
+          <button
+            onMouseDown={() => updateLiveEnhancement({ isComparingOriginal: true })}
+            onMouseUp={() => updateLiveEnhancement({ isComparingOriginal: false })}
+            onMouseLeave={() => updateLiveEnhancement({ isComparingOriginal: false })}
+            onTouchStart={() => updateLiveEnhancement({ isComparingOriginal: true })}
+            onTouchEnd={() => updateLiveEnhancement({ isComparingOriginal: false })}
+            className="px-2.5 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 border border-white/10 rounded text-[10px] font-mono font-bold transition flex items-center gap-1.5 cursor-pointer select-none active:scale-95"
+            title="Press and hold to view original without enhancements"
+          >
+            <SplitSquareVertical className="w-3.5 h-3.5 text-indigo-400" />
+            <span>Hold to Compare</span>
+          </button>
+
+          <button
+            onClick={() => resetLiveEnhancement()}
+            className="p-1 hover:bg-[#27272a] text-zinc-400 hover:text-white rounded-md transition cursor-pointer"
+            title="Dismiss Preview"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
+
       {/* Top Right Zoom Controls */}
       <div className="absolute top-4 right-4 z-20 flex items-center gap-1 bg-[#18181b]/90 backdrop-blur-md p-1 rounded-lg border border-[#27272a] text-zinc-300 shadow-2xl">
         <button
-          onClick={() => setZoomLevel((prev) => Math.max(0.2, (prev ?? 1) - 0.15))}
+          onClick={() => setZoomLevel((prev) => Math.max(0.01, (prev ?? 1) * 0.8))}
           className="p-1.5 hover:bg-[#27272a] rounded text-zinc-400 hover:text-white transition cursor-pointer"
-          title="Zoom Out"
+          title="Zoom Out (-)"
         >
           <ZoomOut className="w-3.5 h-3.5" />
         </button>
-        <span className="text-[11px] font-mono px-2 text-zinc-300 font-bold min-w-12 text-center">
-          {Math.round(currentZoom * 100)}%
-        </span>
         <button
-          onClick={() => setZoomLevel((prev) => Math.min(4, (prev ?? 1) + 0.15))}
+          onClick={() => setZoomLevel(1)}
+          className="text-[11px] font-mono px-2 text-zinc-300 hover:text-white hover:bg-[#27272a] rounded font-bold min-w-12 text-center transition cursor-pointer"
+          title="Click to view 100% (1:1 Actual Pixels)"
+        >
+          {Math.round(currentZoom * 100)}%
+        </button>
+        <button
+          onClick={() => setZoomLevel((prev) => Math.min(8.0, (prev ?? 1) * 1.25))}
           className="p-1.5 hover:bg-[#27272a] rounded text-zinc-400 hover:text-white transition cursor-pointer"
-          title="Zoom In"
+          title="Zoom In (+)"
         >
           <ZoomIn className="w-3.5 h-3.5" />
         </button>
         <div className="w-px h-3.5 bg-[#27272a] mx-0.5" />
         <button
           onClick={handleFitToScreen}
-          className="p-1.5 hover:bg-[#27272a] rounded text-zinc-400 hover:text-white transition cursor-pointer"
+          className="p-1.5 hover:bg-[#27272a] rounded text-zinc-400 hover:text-indigo-400 transition cursor-pointer"
           title="Fit Canvas to Screen"
         >
           <Maximize className="w-3.5 h-3.5" />
         </button>
       </div>
 
-      {/* Canvas Viewport Surface */}
-      <div
-        className="relative shadow-2xl transition-transform duration-75 cursor-grab active:cursor-grabbing"
-        style={{
-          transform: `translate(${panX}px, ${panY}px) scale(${currentZoom})`,
-          transformOrigin: 'center center',
-        }}
-      >
-        <canvas
-          ref={canvasRef}
-          width={project?.width || 1200}
-          height={project?.height || 800}
-          className="bg-[#0c0c0e] ring-1 ring-white/10 shadow-2xl block"
-        />
-
-        {/* Dynamic High-Visibility Interactive Cropping Box with Draggable Handles */}
-        {activeTool === 'crop' && (
-          <CropOverlay
-            cropRect={cropRect}
-            projectWidth={project?.width || 1200}
-            projectHeight={project?.height || 800}
-            canvasRef={canvasRef}
-            onHandleDown={handleCropHandleDown}
+      {/* Centered Canvas Viewport Surface (Absolute layer so huge resolutions never deform the layout) */}
+      <div className="absolute inset-0 flex items-center justify-center overflow-hidden pointer-events-none">
+        <div
+          className="pointer-events-auto relative shadow-2xl transition-transform duration-75 cursor-grab active:cursor-grabbing will-change-transform shrink-0"
+          style={{
+            width: `${project?.width || 1200}px`,
+            height: `${project?.height || 800}px`,
+            transform: `translate(${panX}px, ${panY}px) scale(${currentZoom})`,
+            transformOrigin: 'center center',
+          }}
+        >
+          <canvas
+            ref={canvasRef}
+            width={project?.width || 1200}
+            height={project?.height || 800}
+            className="w-full h-full ring-1 ring-white/10 shadow-2xl block"
+            style={{
+              backgroundImage:
+                'repeating-conic-gradient(#18181b 0% 25%, #222226 0% 50%)',
+              backgroundSize: '24px 24px',
+            }}
           />
-        )}
 
-        {/* Split Comparison Slider Line and Handle */}
-        {splitCompare && (
-          <div
-            className="absolute inset-y-0 z-30 pointer-events-none"
-            style={{ left: `${(splitPosition ?? 0.5) * 100}%` }}
-          >
-            <div className="w-0.5 h-full bg-white shadow-[0_0_8px_rgba(255,255,255,0.8)] relative">
-              <div className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-6 h-6 rounded-full bg-[#18181b] border-2 border-white flex items-center justify-center shadow-2xl">
-                <SplitSquareVertical className="w-3 h-3 text-white" />
+          {/* Dynamic High-Visibility Interactive Cropping Box with Draggable Handles */}
+          {activeTool === 'crop' && (
+            <CropOverlay
+              cropRect={cropRect}
+              projectWidth={project?.width || 1200}
+              projectHeight={project?.height || 800}
+              canvasRef={canvasRef}
+              onHandleDown={handleCropHandleDown}
+            />
+          )}
+
+          {/* Split Comparison Slider Line and Handle */}
+          {splitCompare && (
+            <div
+              className="absolute inset-y-0 z-30 pointer-events-none"
+              style={{ left: `${(splitPosition ?? 0.5) * 100}%` }}
+            >
+              <div className="w-0.5 h-full bg-white shadow-[0_0_8px_rgba(255,255,255,0.8)] relative">
+                <div className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-6 h-6 rounded-full bg-[#18181b] border-2 border-white flex items-center justify-center shadow-2xl">
+                  <SplitSquareVertical className="w-3 h-3 text-white" />
+                </div>
               </div>
             </div>
-          </div>
-        )}
+          )}
+        </div>
       </div>
 
       {/* Camera EXIF Metadata Overlay Badge */}
